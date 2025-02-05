@@ -122,7 +122,7 @@ P0 = mc.SparseMatrix(2)
 # The command to initialize an entry is `setEntry` with syntax `setEntry(row,column,value)`   
 # Hence: the command `P0.setEntry(0,0,0.6)` assigns the value 0.6 to the entry of index (0, 0) of P0.
 # 
-# Now, we define 4 non null entries to P0 matrix.
+# Now, we define 4 no null entries to P0 matrix.
 
 # In[ ]:
 

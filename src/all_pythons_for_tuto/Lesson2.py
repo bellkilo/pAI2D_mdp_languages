@@ -298,7 +298,7 @@ simres = c2.SimulateChainCT( 10.0, stats=False, traj=True, withIncrements=True, 
 
 # Observe the following conventions:
 # 
-# * the first event (#0) is always at time 0 and it results in a transition to the initial state;
+# * the first event (#0) is always at time 0, and it results in a transition to the initial state;
 # * the last date is exactly the simulation time specified;
 # * the sojourn time in the state resulting from event #n is to be read in the following line: that of event #n+1.
 
