@@ -3,31 +3,59 @@ import os
 import marmote.core as mc
 import marmote.mdp as md
 
-def create_jani_model(criterion, trans, reward=None):
-    if isinstance(trans, list):
-        num_states = trans[0].size()
-        num_actions = len(trans)
+
+def build_expression(variables, values):
+    def recurse(items):
+        if len(items) == 1:
+            var, val = items[0]
+            return {"op": "=", "left": var, "right": int(val)}
+        else:
+            mid = len(items) // 2
+            left_expr = recurse(items[:mid])
+            right_expr = recurse(items[mid:])
+            return {
+                "op": "∧",
+                "left": left_expr,
+                "right": right_expr
+            }
+
+    variable_value_pairs = list(zip(variables, values))
+    expression = {
+        "exp": recurse(variable_value_pairs)
+    }
+    return expression
+
+
+def create_jani_model(model, criterion, stateSpace, transitions, actionSpace=None, reward=None):
+    num_states = stateSpace.Cardinal()
+    if actionSpace is not None:
+        num_actions = actionSpace.Cardinal()
     else:
-        num_states = trans.size()
         num_actions = 1
+
+    dims = stateSpace.tot_nb_dims()
+    variable_names = [f"x{i + 1}" for i in range(dims)]
+    variables = []
+    for i, name in enumerate(variable_names):
+        variable_dict = {
+            "name": name,
+            "type": {
+                "kind": "bounded",
+                "base": "int",
+                "lower-bound": 0,
+                "upper-bound": stateSpace.CardinalbyDim(i) - 1
+            },
+            "initial-value": 0
+        }
+        variables.append(variable_dict)
 
     model = {
         "jani-version": 1,
         "name": "MDP Model",
-        "type": "mdp",
+        "type": model.className(),
+        "criterion": criterion,
         "features": ["rewards"],
-        "variables": [
-            {
-                "name": "x",
-                "type": {
-                    "kind": "bounded",
-                    "base": "int",
-                    "lower-bound": 0,
-                    "upper-bound": num_states - 1
-                },
-                "initial-value": 0
-            }
-        ],
+        "variables": variables,
         "actions": [
             {"name": f"action{i}"} for i in range(num_actions)
         ],
@@ -37,29 +65,26 @@ def create_jani_model(criterion, trans, reward=None):
             "initial-locations": ["loc0"],
             "edges": []
         }],
-        "properties": [
-            {"name": "expected_reward", "expression": "R{\"time\"}min=? [F \"final\"]"}
-        ],
         "system": {
             "elements": [
                 {
                     "automaton": "MDPProcess"
                 }]
-        },
-        "criterion": criterion
+        }
     }
 
     automaton = model["automata"][0]
 
     for a in range(num_actions):
         for i in range(num_states):
-
+            stateIn = stateSpace.DecodeState(i)
             destinations = []
             for j in range(num_states):
-                if isinstance(trans, list):
-                    prob = trans[a].getEntry(i, j)
+                stateOut = stateSpace.DecodeState(j)
+                if isinstance(transitions, list):
+                    prob = transitions[a].getEntry(i, j)
                 else:
-                    prob = trans.getEntry(i, j)
+                    prob = transitions.getEntry(i, j)
                 if prob > 0:
                     if reward is not None:
                         reward_value = reward.getEntry(i, a)
@@ -72,9 +97,9 @@ def create_jani_model(criterion, trans, reward=None):
                         },
                         "assignments": [
                             {
-                                "ref": "x",
-                                "value": j
-                            }
+                                "ref": variable_names[n],
+                                "value": int(stateOut[n])
+                            } for n in range(dims)
                         ],
                         "rewards": {
                             "exp": reward_value
@@ -83,13 +108,9 @@ def create_jani_model(criterion, trans, reward=None):
             automaton["edges"].append({
                 "location": "loc0",
                 "action": f"act{a}",
-                "guard": {
-                    "exp": {
-                        "op": "=",
-                        "left": "x",
-                        "right": i
-                    }
-                },
+                "guard":
+                    build_expression(variable_names, stateIn)
+                ,
                 "destinations": destinations
             })
 
@@ -164,7 +185,11 @@ if __name__ == "__main__":
     Reward.setEntry(3, 1, 4000)
     Reward.setEntry(3, 2, 6000)
 
-    model = create_jani_model("minimize", trans, Reward)
+    criterion = "min"
+
+    mdp1 = md.AverageMDP(criterion, stateSpace, actionSpace, trans, Reward)
+
+    model = create_jani_model(mdp1, "minimize", stateSpace, trans, actionSpace, Reward)
 
     save_jani_model_to_file(model, 'simpleJaniFile')
 
