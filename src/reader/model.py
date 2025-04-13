@@ -1,242 +1,430 @@
-from variable import Constant, Variable
-from automaton import Automaton, Edge, EdgeDestination
-from expression import Expression
-
-from typing import Dict, Set, Tuple
-
-from copy import deepcopy
 from itertools import product
+from collections import deque
+from copy import deepcopy
 
-class DuplicateActionError(KeyError):
-    pass
+import json
+import numpy as np
 
-class DuplicateConstantError(KeyError):
-    pass
+from automata import Automata, Edge, EdgeDestination
+from expression import Expression
+from state import State
 
-class DuplicateVariableError(KeyError):
-    pass
+import marmote.core as mc
+import marmote.mdp as mmdp
 
-########### Does not modify ###########
-class Model(object):
-    __slots__ = ("name", "type", "__actions", "__constants", "__transientVars", "__nonTransientVars",
-                "__automaToIndex", "__syncActionsList", "__nonSyncAutomas", "__syncAutoma")
-    
-    def __init__(self, name: str, type: str):
-        self.name = name
-        self.type = type
+class _BaseModel(object):
+    __slots__ = [
+        "_name", "_type", "_actions", "_constants", "_transientVars", "_nonTransientVars",
+        "_functions", "_automataMapIndex", "_preSyncActionsList", "_nonSyncAutomatas", "_automata"
+    ]
 
-        self.__actions = set()
-        self.__constants = dict()
+    def __init__(self, name, type):
+        self._name = name
+        self._type = type
+        
+        self._actions = set()
+        self._constants = dict()
 
-        self.__transientVars = dict()
-        self.__nonTransientVars = dict()
-    
-    def addAction(self, action: str):
+        self._transientVars = dict()
+        self._nonTransientVars = dict()
+
+        self._functions = dict()
+
+        self._automataMapIndex = None
+        self._preSyncActionsList = None
+        self._nonSyncAutomatas = None
+        self._automata = None
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def type(self):
+        return self._type
+
+    def addAction(self, action):
         """Add an action to the model."""
-        if action in self.__actions:
-            raise DuplicateActionError(f"Action '{action}' already exists in the model '{self.name}'")
-        self.__actions.add(action)
-    
-    def containsAction(self, action: str):
-        """Return True if the model contains the action, otherwise False."""
-        return action in self.__actions
-    
-    def addConstant(self, constant: Constant):
-        """Add a constant to the model."""
-        name = constant.name
-        if name in self.__constants:
-            raise DuplicateConstantError(f"Constant '{name}' already exists in the model '{self.name}'")
-        self.__constants[name] = constant
+        if action in self._actions:
+            raise KeyError(f"Action '{action}' already exists in model '{self.name}'")
+        self._actions.add(action)
 
-    def isConstant(self, name: str):
-        """Return True if 'name' is declared as a constant variable in the model."""
-        return name in self.__constants
+    def containsAction(self, action):
+        """Return True if the model contains action, otherwise return False."""
+        return action in self._actions
+
+    def addConstant(self, constant):
+        """Add a constant variable to the model."""
+        name = constant.name
+        if name in self._constants:
+            raise KeyError(f"Constant variable '{name}' already exists in model '{self.name}'")
+        self._constants[name] = constant
     
-    def getConstantValue(self, name: str):
-        """Return the value associated with a constant variable."""
-        constant = self.__constants.get(name)
+    def isConstantVariable(self, name):
+        """Return True if name is declared as a constant variable in the model."""
+        return name in self._constants
+    
+    def getConstantValue(self, name):
+        """Return the associated value of a constant variable, otherwise raise a KeyError."""
+        constant = self._constants.get(name)
         if constant is not None:
             return constant.value
         raise KeyError(f"Unrecognized constant name '{name}' for model '{self.name}'")
-
-    def addVariable(self, variable: Variable):
+    
+    def addVariable(self, variable):
         """Add a variable to the model."""
         name = variable.name
-        if variable.transient:
-            if name in self.__transientVars:
-                raise DuplicateVariableError(f"Transient variable '{name}' already exists in the model '{self.name}'")
-            self.__transientVars[name] = variable
+        transient = variable.transient
+        if transient:
+            if name in self._transientVars:
+                raise KeyError(f"Transient variable '{name}' already exists in model '{self.name}'")
+            self._transientVars[name] = variable
         else:
-            if name in self.__nonTransientVars:
-                raise DuplicateVariableError(f"Non transient variable '{name}' already exists in the model '{self.name}'")
-            self.__nonTransientVars[name] = variable
+            if name in self._nonTransientVars:
+                    raise KeyError(f"Non-transient variable '{name}' already exists in model '{self.name}'")
+            self._nonTransientVars[name] = variable
     
-    def isGlobal(self, name: str):
-        """Return True if 'name' is declared as a costant or global variable (both transient or non-transient)."""
-        if self.isConstant(name):
+    def isGlobalVariable(self, name):
+        """Return True if the variable name is declared as a constant or global variable."""
+        if self.isConstantVariable(name):
             return True
-        var = self.__nonTransientVars.get(name)
-        if var is not None:
-            return var.isGlobal()
-        var = self.__transientVars.get(name)
-        if var is not None:
-            return var.isGlobal()
+        variable = self._transientVars.get(name)
+        if variable is not None:
+            return variable.isGlobal()
+        variable = self._nonTransientVars.get(name)
+        if variable is not None:
+            return variable.isGlobal()
         return False
     
-    def isTransientVariable(self, name: str):
-        """Return True if 'name' is declared as a transient variable, otherwise False."""
-        return name in self.__transientVars
-    
-    def getInitState(self):
-        """Return the initial state."""
-        return State(self.__transientVars,
-                     self.__nonTransientVars,
-                     self.__syncAutoma.initLocations)
+    def isLocalVariable(self, name):
+        """Return True if the variable name is declared as a local variable."""
+        variable = self._transientVars.get(name)
+        if variable is not None:
+            return not variable.isGlobal()
+        variable = self._nonTransientVars.get(name)
+        if variable is not None:
+            return not variable.isGlobal()
+        return False
 
-    def setSystemInformations(self, automaToIndex, syncActionsList):
-        """Add system informations, in particular, automaton informations."""
-        self.__automaToIndex = automaToIndex
-        self.__syncActionsList = syncActionsList
-        self.__nonSyncAutomas = [None] * len(self.__automaToIndex)
-
-    def addAutomaton(self, automaton: Automaton):
-        """Add a non-synchronized automaton to the model."""
-        name = automaton.name
-        if name not in self.__automaToIndex:
-            raise KeyError(f"Unrecognized automaton '{name}' for model '{self.name}'")
-        index = self.__automaToIndex[name]
-        self.__nonSyncAutomas[index] = automaton
+    def isTransientVariable(self, name):
+        """Return True if name is declared as a transient variable."""
+        return name in self._transientVars
     
+    def containsVariable(self, name):
+        """Return True if the model contains variable name, otherwise return False."""
+        return name in self._constants or name in self._transientVars or name in self._nonTransientVars
+
+    def declareFunction(self, name):
+        """Declare the name as a function."""
+        if name in self._functions:
+            raise KeyError(f"Function '{name}' already exists in model '{self.name}'")
+        self._functions[name] = None
+
+    def addFunction(self, function):
+        """Add a function to the model."""
+        name = function.name
+        if name not in self._functions:
+            raise KeyError(f"Undeclared function name '{name}' for model '{self.name}'")
+        self._functions[name] = function
+    
+    def containsFunction(self, name):
+        """Return True if the model contains function, otherwise return False."""
+        return name in self._functions
+    
+    def getFunction(self, name):
+        """Return the function associated with the name."""
+        if not self.containsFunction(name):
+            raise SyntaxError(f"Unrecognized function '{name}' for model '{self.name}'")
+        return self._functions[name]
+
+    def setSystemInformation(self, automataMapIndex, preSysnActionsList):
+        """Add system information to the model."""
+        if self._automataMapIndex is not None and self._preSyncActionsList is not None:
+            raise Exception("System information has already been defined and cannot be redefined")
+        self._automataMapIndex = automataMapIndex
+        self._preSyncActionsList = preSysnActionsList
+        self._nonSyncAutomatas = [None] * len(self._automataMapIndex)
+
+    def addAutomata(self, automata):
+        """Add a non-synchronized automata to the model."""
+        if self._automataMapIndex is None:
+            raise Exception("System information not defined")
+        name = automata.name
+        if name not in self._automataMapIndex:
+            raise KeyError(f"Unrecognized automata '{name}' for model '{self.name}'")
+        idx = self._automataMapIndex[name]
+        self._nonSyncAutomatas[idx] = automata
+    
+    def getInitStates(self):
+        """Return all possible initial states."""
+        states = []
+        locs = self._automata.locations
+        setOfLocation = self._automata.initLocation
+        for vars in product(*map(lambda x: x.instantiate(), self._nonTransientVars.values())):
+            transientVars = deepcopy(self._transientVars)
+            nonTransientVars = { var.name: var for var in vars }
+            for loc in setOfLocation:
+                if loc not in locs:
+                    continue
+                for ref, value in locs[loc].items():
+                    transientVars[ref].setValueTo(value.eval(nonTransientVars, self._functions))
+            states.append(State(transientVars, nonTransientVars, setOfLocation))
+        return states
+
     def synchronize(self):
-        self.__syncAutoma = self.__synchronizeAutomaton()
-        del self.__nonSyncAutomas
-
-    def __synchronizeAutomaton(self) -> Automaton:
-        if len(self.__automaToIndex) == 1:
-            return self.__nonSyncAutomas[0]
+        """Synchronize automata."""
+        if self._automata is not None:
+            raise Exception("Synchronization is complete")
+        self._automata = self._synchronizeAutomata()
+        del self._nonSyncAutomatas
+    
+    def _synchronizeAutomata(self):
+        # If there is only 1 automata, then synchronization is not necessary,
+        # we simply return this automata directly.
+        if len(self._nonSyncAutomatas) == 1:
+            return self._nonSyncAutomatas[0]
         
-        syncNonSilentActions = set()
+        syncActions = set()
         syncEdges = list()
-        syncInitLocations = set()
-        syncLocations = dict()
+        syncInitLoc = set()
+        syncLocs = dict()
 
-        actionMapList = []
-        nonSyncAutomas = self.__nonSyncAutomas
-        for automa in nonSyncAutomas:
-            syncLocations.update(automa.locations)
-            syncInitLocations.update(automa.initLocations)
+        # Preprocessing.
+        actionMapEdgesList = []
+        for automata in self._nonSyncAutomatas:
+            syncInitLoc.update(automata.initLocation)
+            syncLocs.update(automata.locations)
+
             actionMapEdges = dict()
-
-            for edge in automa.edges:
+            for edge in automata.edges:
                 action = edge.action
                 if action == "silentAction":
                     syncEdges.append(edge)
                 else:
                     actionMapEdges.setdefault(action, []).append(edge)
-            actionMapList.append(actionMapEdges)
-        
-        for result, syncActions in self.__syncActionsList:
-            syncNonSilentActions.add(result)
+            actionMapEdgesList.append(actionMapEdges)
 
+        # Synchronization.
+        for result, preSyncActions in self._preSyncActionsList:
+            syncActions.add(result)
             preSyncEdgesList = []
-            for i, syncAction in enumerate(syncActions):
-                if syncAction is not None:
-                    preSyncEdgesList.append(actionMapList[i][syncAction])
-
-
-            if len(preSyncEdgesList) == 1:
-                for edge in preSyncEdgesList[0]:
-                    syncEdges.append(edge)
-                continue
+            for i, preSyncAcition in enumerate(preSyncActions):
+                if preSyncAcition is not None:
+                    preSyncEdgesList.append(actionMapEdgesList[i][preSyncAcition])
 
             for edgeComb in product(*preSyncEdgesList):
-                syncEdges.append(self.__synchronizeEdge(edgeComb, result))
-            
-        self.__actions = syncNonSilentActions
-        return Automaton("Main", syncLocations, syncInitLocations, syncEdges)
+                syncEdges.append(self._synchronizeEdge(edgeComb, result))
+        self._actions = syncActions
+        return Automata("Main", syncLocs, syncInitLoc, syncEdges)
     
-    def __synchronizeEdge(self, edgeComb: Tuple[Edge], action: str) -> Edge:
-        syncSource = set()
+    def _synchronizeEdge(self, edgeComb, action):
+        syncSrc = set()
         syncGuard = Expression("bool", True)
 
-
-        preSyncEdgesDestinationsList = []
+        preSyncEdgeDestsList = []
         for edge in edgeComb:
-            syncGuard = Expression.mergeExpression(syncGuard, edge.guard)
-            syncSource.update(edge.source)
-
-            preSyncEdgesDestinationsList.append(edge.edgeDestinations)
+            syncSrc.update(edge.source)
+            syncGuard = Expression.reduceExpression("∧", syncGuard, edge.guard)
+            preSyncEdgeDestsList.append(edge.edgeDestinations)
         
-        syncEdgeDestinations = [ self.__synchronizeEdgeDestination(edgeDestComb) 
-                                 for edgeDestComb in product(*preSyncEdgesDestinationsList) ]
-        return Edge(syncSource, action, syncGuard, syncEdgeDestinations)
+        syncEdgeDests = [
+            self._synchronizeEdgeDestination(edgeDestComb) for edgeDestComb in product(*preSyncEdgeDestsList)
+        ]
+        return Edge(syncSrc, action, syncGuard, syncEdgeDests)
     
-    def __synchronizeEdgeDestination(self, edgeDestComb: Tuple[EdgeDestination]) -> EdgeDestination:
-        syncProb = Expression("real", 1.)
+    def _synchronizeEdgeDestination(self, edgeDestComb):
         syncDest = set()
-        syncAssigns = dict()
+        syncProb = Expression("real", 1.)
+        syncAssngs = dict()
         syncReward = Expression("int", 0)
 
         for edgeDest in edgeDestComb:
-            syncProb = Expression.mergeExpression(syncProb, edgeDest.probability)
             syncDest.update(edgeDest.destination)
-            syncAssigns.update(edgeDest.assignments)
-            syncReward = Expression.reduceExpr("+", syncReward, edgeDest.reward)
-        return EdgeDestination(syncDest, syncProb, syncAssigns, syncReward)
+            syncProb = Expression.reduceExpression("*", syncProb, edgeDest.probability)
+            syncAssngs.update(edgeDest.assignments)
+            syncReward = Expression.reduceExpression("+", syncReward, edgeDest.reward) # TODO
+        return EdgeDestination(syncDest, syncProb, syncAssngs, syncReward)
+
+
+class JaniModel(_BaseModel):
+    def __init__(self, name, type):
+        super().__init__(name, type)
+
+        self._properties = dict()
     
-    def getSyncAutoma(self):
-        return self.__syncAutoma
+    def addProperty(self, property):
+        """Add a property to the model."""
+        pass
     
-    def getActions(self):
-        return self.__actions
+    # def writeJaniR(self, path, p):
+    #     modelStruct = dict()
+    #     modelStruct["name"] = self.name
 
-#######################################
+    def writeJaniR(self, path, targetProperty):
+        """"""
+        model = dict()
+        model["name"] = self._name
+        model["type"] = self._type
+        # to do reward type, resolution model, hrizon, discount, explicit or implicit
+        model["reward-type"] = "state-transition-reward"
+        model["state-type"] = "implicit"
+        model["resolution-model"] = "TotalRewardMDP"
 
-class State(object):
-    __slots__ = ("__transientVars", "__nonTransientVars", "__location", "__hashObject")
+        # model["constants"] = [ contant.toJaniRRepresentation() for contant in self._constants.values() ]
 
-    def __init__(self,
-                 transientVars: Dict[str, Variable],
-                 nonTransientVars: Dict[str, Variable],
-                 location: Set[str]):
-        self.__transientVars = transientVars
-        self.__nonTransientVars = nonTransientVars
-        self.__location = frozenset(location)
-
-        self.__hashObject = (frozenset(self.__nonTransientVars.values()), self.__location)
-    
-    def clone(self,
-              source: Set[str],
-              destination: Set[str],
-              assignments: Dict[str, Expression]):
-        transientVars = deepcopy(self.__transientVars)
-        nonTransientVars = deepcopy(self.__nonTransientVars)
-
-        # for var in transientVars.values():
-        #     var.resetToInitValue()
-
-        for ref, expr in assignments.items():
-            nonTransientVars[ref].setValueTo(expr.eval(self))
-
-        location = self.__location.difference(source).union(destination)
-
-        return State(transientVars, nonTransientVars, location)
+        globalVariables = []
+        localVariables = dict()
+        for variable in {**self._transientVars, **self._nonTransientVars}.values():
+            if variable.isGlobal():
+                globalVariables.append(variable.toJaniRRepresentation())
+            else:
+                _, automaName = variable.scope
+                localVariables.setdefault(automaName, []).append(variable.toJaniRRepresentation())
+        model["variables"] = globalVariables
         
-    def get(self, name):
-        var = self.__transientVars.get(name)
-        if var is not None:
-            return var.getValue()
-        variable = self.__nonTransientVars.get(name)
-        if variable is not None:
-            return variable.getValue()
-        raise KeyError(f"Unrecognized key '{name}' for state")
+        model["actions"] = [ { "name": action } for action in self._actions ]
+
+        system = dict()
+        system["elements"] = [ { "automaton": automa } for automa in self._automataMapIndex.keys() ]
+        system["syncs"] = [ {
+            "synchronise": syncActions,
+            "result": result
+        } for result, syncActions in self._preSyncActionsList ]
+        model["system"] = system
+
+        model["automata"] = [ automa.toJaniRRepresentation() for automa in self._nonSyncAutomatas ]
+        for automa in model["automata"]:
+            name = automa["name"]
+            if name in localVariables:
+                automa["variables"] = localVariables[name]
+            
+            # to do add property.
+
+        with open(path, "w", encoding = "utf-8-sig") as file:
+            file.write(json.dumps(model, indent=4, ensure_ascii=False))
+        # variables = []
+        # self._writeAumata()
+
+
+class JaniRModel(_BaseModel):
+    def __init__(self, name, type):
+        super().__init__(name, type)
     
-    @property
-    def location(self):
-        return self.__location
-    
-    def __eq__(self, value: 'State'):
-        return isinstance(value, State) and self.__hashObject == value.__hashObject
-    
-    def __hash__(self):
-        return hash(self.__hashObject)
+    def _buildStateAndTransition(self):
+        visitedStates = set()
+        transitions = dict()
+        deadlocks = dict()
+        maxSilentActionCounter = 0
+
+        lowMemReprMap = dict()
+        queue = deque()
+        initStates = self.getInitStates()
+        for initState in initStates:
+            lowMemReprMap[initState] = initState.getLowMemRepr()
+            queue.append(initState)
+        
+        edges = self._automata.edges
+        locs = self._automata.locations
+        funcGetter = self._functions
+        while queue:
+            state = queue.popleft()
+            if state not in visitedStates:
+                stateLowMemRepr = state.getLowMemRepr()
+                visitedStates.add(state)
+
+
+                print(len(visitedStates), end="\r")
+
+                deadlock = True
+                silentActionCounter = 0
+                for edge in edges:
+                    if not edge.isSatisfied(state, funcGetter):
+                        continue
+
+                    deadlock = False
+                    source = edge.source
+                    action = edge.action
+                    if action == "silentAction":
+                        action = f"{action}_{silentActionCounter}"
+                        silentActionCounter += 1
+                    for edgeDestination in edge.edgeDestinations:
+                        nextState = state.clone(source,
+                                                edgeDestination.destination,
+                                                edgeDestination.assignments,
+                                                locs,
+                                                funcGetter)
+                        probability = edgeDestination.probability.eval(varGetter = state,
+                                                                       funcGetter = funcGetter)
+                        reward = edgeDestination.reward.eval(varGetter = nextState,
+                                                             funcGetter = funcGetter)
+                        if probability <= 0.:
+                            continue
+
+                        nextStateLowMemRepr = lowMemReprMap.get(nextState)
+                        if nextStateLowMemRepr is None:
+                            lowMemReprMap[nextState] = nextState.getLowMemRepr()
+                            nextStateLowMemRepr = lowMemReprMap[nextState]
+
+                        transition = (stateLowMemRepr, nextStateLowMemRepr, action)
+                        transitions[transition] = transitions.get(transition,
+                                                                  np.array([0., 0.])) + [probability, reward]
+                        if nextState not in visitedStates:
+                            queue.append(nextState)
+                        else:
+                            del nextState
+                if deadlock:
+                    deadlocks[(stateLowMemRepr, stateLowMemRepr, "deadlock")] = np.array([1., 0.])
+                maxSilentActionCounter = max(maxSilentActionCounter, silentActionCounter)
+            else:
+                del state
+        actions = { f"silentAction_{i}" for i in range(maxSilentActionCounter) }
+        actions.update(self._actions)
+
+        return initStates, set(lowMemReprMap.values()), transitions, deadlocks, actions
+
+    def _buildTransitionAndRewardMatrix(self, states, transitions, actions):
+        transitionsPrime = {
+            action: {
+                state: {
+                    statePrime: None for statePrime in states
+                } for state in states
+            } for action in actions
+        }
+        for (state, statePrime, action), data in transitions.items():
+            transitionsPrime[action][state][statePrime] = data
+
+        stateMapIndex = { state: i for i, state in enumerate(states) }
+        actionMapIndex  = { action: i for i, action in enumerate(actions) }
+
+        
+
+        n, m = len(states), len(actions)
+        stateSpace = mc.MarmoteInterval(0, n - 1)
+        actionSpace = mc.MarmoteInterval(0, m - 1)
+
+        Transitions = [ mc.SparseMatrix(n) for _ in range(m) ]
+        Rewards = [ mc.SparseMatrix(n) for _ in range(m) ]
+        for action in actions:
+            actionIndex = actionMapIndex[action]
+            for state in states:
+                stateIndex = stateMapIndex[state]
+                for statePrime in states:
+                    statePrimeIndex = stateMapIndex[statePrime]
+                    data = transitionsPrime[action][state][statePrime]
+
+                    if data is None:
+                        # TODO
+                        continue
+                    else:
+                        prob, rew = data
+                        Transitions[actionIndex].addEntry(stateIndex, statePrimeIndex, prob)
+                        Rewards[actionIndex].addEntry(stateIndex, statePrimeIndex, rew)
+        return stateSpace, actionSpace, Transitions, Rewards
+
+    def buildTransitionAndReward(self):
+        _, states, transitions, deadlocks, actions = self._buildStateAndTransition()
+        print(f"{len(states)} states")
+        print(f"{len(actions)} actions")
+        print(f"{len(transitions)} transitions and {len(deadlocks)} deadlocks")
+        print(f"In total {len(transitions) + len(deadlocks)} transitions")
+        return self._buildTransitionAndRewardMatrix(states, transitions, actions)

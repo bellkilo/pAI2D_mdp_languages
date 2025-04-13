@@ -1,16 +1,14 @@
 import numpy as np
-from typing import Union
 
 class Expression(object):
-    __slots__ = ("__kind", "__args", "__arity")
-
-    __OPERATORS = {
+    _OPERATORS = {
+        # Logical operator.
         "∨": np.logical_or,
         "∧": np.logical_and,
         "¬": np.logical_not,
-
         "⇒": lambda x, y: np.logical_or(np.logical_not(x), y),
 
+        # Comparison operator.
         "=": np.equal,
         "≠": np.not_equal,
         "<": np.less,
@@ -18,6 +16,7 @@ class Expression(object):
         ">": np.greater,
         "≥": np.greater_equal,
 
+        # Arithmetic operator.
         "+": np.add,
         "-": np.subtract,
         "*": np.multiply,
@@ -33,110 +32,188 @@ class Expression(object):
         "max": np.maximum,
         "trc": np.trunc
     }
-    
-    def __init__(self,
-                 kind: str,
-                 *args: Union['Expression', int, float, bool]):
-        self.__kind = kind
-        self.__args = args
-        self.__arity = len(self.__args)
 
-    def eval(self, struct):
-        kind = self.__kind
-        if kind in ("int", "real", "bool"):
-            return self.__args[0]
-        
-        elif kind == "var":
-            if self.__args[0] == "line_seized":
-                print(struct.get(self.__args[0]))
-            return struct.get(self.__args[0])
-        
-        elif kind == "ite":
-            condition, ifExpr, elseExpr = self.__args
-            if condition.eval(struct):
-                return ifExpr.eval(struct)
-            return elseExpr.eval(struct)
+    def __init__(self, kind, *args):
+        self._kind = kind
+        self._args = args
 
-        elif kind == "call":
-            pass
+        if self._kind not in self._OPERATORS and \
+            self._kind not in ["int", "real", "bool", "var", "ite", "call"]:
+            raise Exception(f"Unsupported kind '{self._kind}'")
 
-        elif kind in self.__OPERATORS:
-            operator = self.__OPERATORS[kind]
-            if self.__arity == 1:
-                return operator(self.__args[0].eval(struct))
-            else:
-                left, right = self.__args
-                return operator(left.eval(struct), right.eval(struct))
-        else:
-            raise Exception()
+    def isConstExpression(self):
+        """Return True if it is a constant expression, otherwise return False."""
+        return self._kind in ["int", "real", "bool"]
 
-    def isConstExpr(self):
-        return self.__kind in ("int", "real", "bool")
-    
+    def eval(self,
+             varGetter = None,
+             funcGetter = None,
+             funcVarGetter = None):
+        """Evaluate the expression."""
+        kind = self._kind
+        # Constant expression.
+        if self.isConstExpression():
+            return self._args[0]
+        # Variable expression.
+        if kind == "var":
+            # varGetter = getters.get("variable")
+            name = self._args[0]
+            if varGetter is not None and name in varGetter:
+                return varGetter.get(name)
+            if funcGetter is not None and name in funcGetter:
+                return funcGetter.get(name)
+            if funcVarGetter is not None and name in funcVarGetter:
+                return funcVarGetter.get(name)
+            raise KeyError(f"Unrecognized variable '{name}'")
+        # If-else expression.
+        if kind == "ite":
+            condition, then, otherwise = self._args
+            if condition.eval(varGetter,
+                              funcGetter,
+                              funcVarGetter):
+                return then.eval(varGetter,
+                                 funcGetter,
+                                 funcVarGetter)
+            return otherwise.eval(varGetter,
+                                  funcGetter,
+                                  funcVarGetter)
+        # Function call expression.
+        if kind == "call":
+            # to do
+            raise Exception("Not implemented yet")
+        # Unary or binary expression.
+        if kind in self._OPERATORS:
+            operator = self._OPERATORS[kind]
+            arity = len(self._args)
+            if arity == 1:
+                return operator(self._args[0].eval(varGetter, funcGetter, funcVarGetter))
+            left, right = self._args
+            return operator(left.eval(varGetter, funcGetter, funcVarGetter),
+                            right.eval(varGetter, funcGetter, funcVarGetter))
+
     @staticmethod
-    def createConstExpr(value):
+    def createConstExpression(value):
+        """Create a constant expression."""
         if isinstance(value, (int, np.integer)):
-            return Expression("int", value)
+            return Expression("int", int(value))
         if isinstance(value, (float, np.floating)):
-            return Expression("real", value)
+            return Expression("real", float(value))
         if isinstance(value, (bool, np.bool_)):
-            return Expression("bool", value)
-        raise Exception(f"Unrecognized value type'{type(value)}'")
+            return Expression("bool", bool(value))
+        raise Exception(f"Unsupported value type '{type(value)}' for constant expression.")
     
     @staticmethod
-    def reduceExpr(op, *expr: 'Expression'):
-        arity = len(expr)
-        operator = Expression.__OPERATORS.get(op)
-        # if arity == 1:
-        #     # to do
-        #     pass
-        if arity == 2:
-            left, right = expr
-            if left.isConstExpr() and right.isConstExpr():
-                value = operator(left.eval(None), right.eval(None))
-                return Expression.createConstExpr(value)
-            return Expression(op, left, right)
-        # else:
-        #     # to do
-        #     pass
-
-
-    @staticmethod
-    def mergeExpression(expr1: 'Expression', expr2: 'Expression'):
-        return Expression.reduceExpr("∧", expr1, expr2)
+    def reduceExpression(op, *args: 'Expression'):
+        """Return a reduced expression."""
+        # If-else or call expression.
+        if op not in Expression._OPERATORS:
+            if op == "ite":
+                condition, then, otherwise = args
+                if condition.isConstExpression():
+                    if condition.eval():
+                        return then
+                    return otherwise
+                return Expression("ite", *args)
+            if op == "call":
+                return Expression("call", *args)
+            raise Exception(f"Unrecognized operator '{op}'")
+        arity = len(args)
+        operator = Expression._OPERATORS[op]
+        # Unary expression.
+        if arity == 1:
+            if args[0].isConstExpression():
+                return Expression.createConstExpression(args[0].eval())
+        # Binary expression.
+        elif arity == 2:
+            left, right = args
+            leftConstExpression = left.isConstExpression()
+            rightConstExpression = right.isConstExpression()
+            if leftConstExpression and rightConstExpression:
+                return Expression.createConstExpression(operator(left.eval(), right.eval()))
+            # Case with binary logical expression.
+            if op == "∨":
+                # True or expr | expr or True -> True.
+                # False or expr | expr or False -> expr.
+                if leftConstExpression:
+                    if left.eval():
+                        return Expression("bool", True)
+                    return right
+                if rightConstExpression:
+                    if right.eval():
+                        return Expression("bool", True)
+                    return left
+            if op == "∧":
+                # True and expr | expr and True -> expr.
+                # False and expr | expr and False -> False.
+                if leftConstExpression:
+                    if not left.eval():
+                        return Expression("bool", False)
+                    return right
+                if rightConstExpression:
+                    if not right.eval():
+                        return Expression("bool", False)
+                    return left
+            if op == "⇒":
+                # (not False) or expr -> True.
+                # (not True) or expr -> expr.
+                # (not expr) ot True -> True.
+                # (not expr) or False -> not expr.
+                if leftConstExpression:
+                    if not left.eval():
+                        return Expression("bool", True)
+                    return right
+                if rightConstExpression:
+                    if right.eval():
+                        return Expression("bool", True)
+                    return Expression("¬", left)
+        return Expression(op, *args)
     
+    def toJaniRRepresentation(self):
+        kind = self._kind
+        if self.isConstExpression():
+            return self._args[0]
+        if kind == "var":
+            return self._args[0].split(".")[0]
+        if kind == "ite":
+            pass
+        if kind == "call":
+            pass
+        if kind in self._OPERATORS:
+            arity = len(self._args)
+            if arity == 1:
+                return {
+                    "op": kind,
+                    "exp": self._args[0].toJaniRRepresentation()
+                }
+            else:
+                left, right = self._args
+                return {
+                    "op": kind,
+                    "left": left.toJaniRRepresentation(),
+                    "right": right.toJaniRRepresentation()
+                }
+
     def __str__(self):
-        match self.__arity:
-            case 1:
-                if self.__kind in [ "int", "real", "bool", "var" ]:
-                    return str(self.__args[0])
-                return f"{self.__kind}{self.__args[0]}"
-            case 2:
-                left, right = self.__args
-                return f"({left}) {self.__kind} ({right})"
-            case _:
+        arity = len(self._args)
+        kind = self._kind
+        if arity == 1:
+            if kind in ["int", "real", "bool", "var"]:
+                return str(self._args[0])
+            return f"{kind}{self._args[0]}"
+        if arity == 2:
+            if kind == "call":
                 pass
-        return
-    
+            left, right = self._args
+            if kind in ("pow", "log", "floor", "ceil", "abs", "sgn", "min", "max", "trc"):
+                return f"{kind} ({left}, {right})"
+            return f"({left}) {kind} ({right})"
+        if arity == 3:
+            if kind == "ite":
+                condition, then, otherwise = self._args
+                return f"if ({condition}) {{then}} else {{otherwise}}"
+        pass
+
     def __repr__(self):
         return self.__str__()
+
     
-if __name__ == "__main__":
-    from itertools import product
-    expr = Expression("⇒",
-                           Expression("∧",
-                                           Expression("∨",
-                                                           Expression("var", "a"),
-                                                           Expression("var", "c")),
-                                           Expression("∨",
-                                                           Expression("var", "b"),
-                                                           Expression("var", "c"))),
-                           Expression("⇒",
-                                           Expression("¬", Expression("var", "b")),
-                                           Expression("∨",
-                                                           Expression("∧",
-                                                                           Expression("var", "a"),
-                                                                           Expression("var", "b")),
-                                                           Expression("var", "c"))))
-    
-    print(np.all([expr.eval({ "a": a, "b": b, "c": c }) for a, b, c in product([True, False], repeat=3)]))
