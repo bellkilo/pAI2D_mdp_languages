@@ -254,66 +254,111 @@ class JaniModel(_BaseModel):
     
     def addProperty(self, property):
         """Add a property to the model."""
+        # TODO
+        name = property.name
+        self._properties[name] = property
         pass
     
-    # def writeJaniR(self, path, p):
-    #     modelStruct = dict()
-    #     modelStruct["name"] = self.name
-
     def writeJaniR(self, path, targetProperty):
-        """"""
-        model = dict()
-        model["name"] = self._name
-        model["type"] = self._type
-        # to do reward type, resolution model, hrizon, discount, explicit or implicit
-        model["reward-type"] = "state-transition-reward"
-        model["state-type"] = "implicit"
-        model["resolution-model"] = "TotalRewardMDP"
+        modelStruct = dict()
+        modelStruct["name"] = self.name
 
-        # model["constants"] = [ contant.toJaniRRepresentation() for contant in self._constants.values() ]
+        # TODO
+        modelStruct["type"] = "TotalRewardMDP"
+        modelStruct["criterion"] = "max"
+        ####
 
-        globalVariables = []
-        localVariables = dict()
-        for variable in {**self._transientVars, **self._nonTransientVars}.values():
-            if variable.isGlobal():
-                globalVariables.append(variable.toJaniRRepresentation())
+        modelStruct["constants"] = [
+            constant.toJaniRRepresentation()
+            for constant in self._constants.values()
+        ]
+
+        modelStruct["actions"] = [
+            { "name": action }
+            for action in self._actions
+        ]
+
+        globalVars = list()
+        localVars = dict()
+        for var in { **self._transientVars, **self._nonTransientVars }.values():
+            if var.isGlobal():
+                globalVars.append(var.toJaniRRepresentation())
             else:
-                _, automaName = variable.scope
-                localVariables.setdefault(automaName, []).append(variable.toJaniRRepresentation())
-        model["variables"] = globalVariables
+                _, automata = var.scope
+                localVars.setdefault(automata, []).append(var.toJaniRRepresentation())
+        modelStruct["variables"] = globalVars
+
+        globalFuncs = list()
+        localFuncs = dict()
+        for func in self._functions.values():
+            if func.isGlobal():
+                globalFuncs.append(func.toJaniRRepresentation())
+            else:
+                _, automata = func.scope
+                localFuncs.setdefault(automata, []).append(func.toJaniRRepresentation())
+        modelStruct["functions"] = globalFuncs
+
+        modelStruct["system"] = {
+            "elements": [
+                { "automaton": automata }
+                for automata in self._automataMapIndex.keys()
+            ],
+            "syncs": [
+                {
+                    "synchronise": syncActions,
+                    "result": result
+                } for result, syncActions in self._preSyncActionsList
+            ]
+        }
+
+        modelStruct["automata"] = [
+            automata.toJaniRRepresentation()
+            for automata in self._nonSyncAutomatas
+        ]
+        for automata in modelStruct["automata"]:
+            name = automata["name"]
+            if name in localVars:
+                automata["variables"] = localVars[name]
+            if name in localFuncs:
+                automata["functions"] = localFuncs[name]
+
+        # TODO
+        if targetProperty is not None:
+            property = self._properties[targetProperty]
+            reward = property.reward.toJaniRRepresentation()
+            for automata in modelStruct["automata"]:
+                for edges in automata["edges"]:
+                    for edgeDest in edges["destinations"]:
+                        edgeDest["reward"]["exp"] = reward
+        ####
         
-        model["actions"] = [ { "name": action } for action in self._actions ]
-
-        system = dict()
-        system["elements"] = [ { "automaton": automa } for automa in self._automataMapIndex.keys() ]
-        system["syncs"] = [ {
-            "synchronise": syncActions,
-            "result": result
-        } for result, syncActions in self._preSyncActionsList ]
-        model["system"] = system
-
-        model["automata"] = [ automa.toJaniRRepresentation() for automa in self._nonSyncAutomatas ]
-        for automa in model["automata"]:
-            name = automa["name"]
-            if name in localVariables:
-                automa["variables"] = localVariables[name]
-            
-            # to do add property.
-
-        with open(path, "w", encoding = "utf-8-sig") as file:
-            file.write(json.dumps(model, indent=4, ensure_ascii=False))
-        # variables = []
-        # self._writeAumata()
+        with open(path, "w", encoding="utf-8-sig") as file:
+            file.write(json.dumps(modelStruct, indent=4, ensure_ascii=False))
 
 
 class JaniRModel(_BaseModel):
-    def __init__(self, name, type):
+    def __init__(self, name, type, criterion, gamma, horizon):
         super().__init__(name, type)
+        self._criterion = criterion
+        self._gamma = gamma
+        self._horizon = horizon
+
+    @property
+    def criterion(self):
+        return self._criterion
+    
+    @property
+    def gamma(self):
+        return self._gamma
+    
+    @property
+    def horizon(self):
+        return self._horizon
     
     def _buildStateAndTransition(self):
         visitedStates = set()
         transitions = dict()
-        deadlocks = dict()
+        deadlocks = set()
         maxSilentActionCounter = 0
 
         lowMemReprMap = dict()
@@ -373,7 +418,8 @@ class JaniRModel(_BaseModel):
                         else:
                             del nextState
                 if deadlock:
-                    deadlocks[(stateLowMemRepr, stateLowMemRepr, "deadlock")] = np.array([1., 0.])
+                    # deadlocks[(stateLowMemRepr, stateLowMemRepr, "deadlock")] = np.array([1., 0.])
+                    deadlocks.add(stateLowMemRepr)
                 maxSilentActionCounter = max(maxSilentActionCounter, silentActionCounter)
             else:
                 del state
@@ -382,12 +428,10 @@ class JaniRModel(_BaseModel):
 
         return initStates, set(lowMemReprMap.values()), transitions, deadlocks, actions
 
-    def _buildTransitionAndRewardMatrix(self, states, transitions, actions):
+    def _buildTransitionAndRewardMatrix(self, states, transitions, deadlocks, actions):
         transitionsPrime = {
             action: {
-                state: {
-                    statePrime: None for statePrime in states
-                } for state in states
+                state: dict() for state in states
             } for action in actions
         }
         for (state, statePrime, action), data in transitions.items():
@@ -396,7 +440,7 @@ class JaniRModel(_BaseModel):
         stateMapIndex = { state: i for i, state in enumerate(states) }
         actionMapIndex  = { action: i for i, action in enumerate(actions) }
 
-        
+        penality = float("-inf") if self.criterion == "max" else float("inf")
 
         n, m = len(states), len(actions)
         stateSpace = mc.MarmoteInterval(0, n - 1)
@@ -408,23 +452,27 @@ class JaniRModel(_BaseModel):
             actionIndex = actionMapIndex[action]
             for state in states:
                 stateIndex = stateMapIndex[state]
-                for statePrime in states:
-                    statePrimeIndex = stateMapIndex[statePrime]
-                    data = transitionsPrime[action][state][statePrime]
+                items = transitionsPrime[action][state].items()
+                if items:
+                    for statePrime, data in items:
+                        statePrimeIndex = stateMapIndex[statePrime]
 
-                    if data is None:
-                        # TODO
-                        continue
-                    else:
                         prob, rew = data
+
                         Transitions[actionIndex].addEntry(stateIndex, statePrimeIndex, prob)
                         Rewards[actionIndex].addEntry(stateIndex, statePrimeIndex, rew)
+                else:
+                    Transitions[actionIndex].addEntry(stateIndex, stateIndex, 1.)
+                    if state not in deadlocks:
+                        Rewards[actionIndex].addEntry(stateIndex, stateIndex, penality)
         return stateSpace, actionSpace, Transitions, Rewards
 
     def buildTransitionAndReward(self):
-        _, states, transitions, deadlocks, actions = self._buildStateAndTransition()
+        initStates, states, transitions, deadlocks, actions = self._buildStateAndTransition()
         print(f"{len(states)} states")
         print(f"{len(actions)} actions")
         print(f"{len(transitions)} transitions and {len(deadlocks)} deadlocks")
-        print(f"In total {len(transitions) + len(deadlocks)} transitions")
-        return self._buildTransitionAndRewardMatrix(states, transitions, actions)
+        print(f"In total, {len(transitions) + len(deadlocks)} transitions")
+        stateMapIndex = { state: i for i, state in enumerate(states) }
+        print([stateMapIndex[s.getLowMemRepr()] for s in initStates])
+        return self._buildTransitionAndRewardMatrix(states, transitions, deadlocks, actions)

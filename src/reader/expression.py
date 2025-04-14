@@ -32,64 +32,78 @@ class Expression(object):
         "max": np.maximum,
         "trc": np.trunc
     }
-
+    
     def __init__(self, kind, *args):
         self._kind = kind
         self._args = args
 
-        if self._kind not in self._OPERATORS and \
-            self._kind not in ["int", "real", "bool", "var", "ite", "call"]:
+        if self._kind not in self._OPERATORS and self._kind not in ["int", "real", "bool", "var", "ite", "call"]:
             raise Exception(f"Unsupported kind '{self._kind}'")
-
+        
+    @property
+    def kind(self):
+        return self._kind
+    
     def isConstExpression(self):
-        """Return True if it is a constant expression, otherwise return False."""
-        return self._kind in ["int", "real", "bool"]
+        """Return True if it is a constante expression, otherwise return False."""
+        return self.kind in ["int", "real", "bool"]
 
-    def eval(self,
-             varGetter = None,
-             funcGetter = None,
-             funcVarGetter = None):
+    def eval(self, varGetter=None, funcGetter=None, funcVarGetter=None):
         """Evaluate the expression."""
-        kind = self._kind
-        # Constant expression.
+        kind = self.kind
+        # Evaluate a constant expression.
         if self.isConstExpression():
             return self._args[0]
-        # Variable expression.
+        # Evaluate a variable (model variable or function or function variable) expression.
         if kind == "var":
-            # varGetter = getters.get("variable")
             name = self._args[0]
+            # Return the associated value.
             if varGetter is not None and name in varGetter:
                 return varGetter.get(name)
-            if funcGetter is not None and name in funcGetter:
-                return funcGetter.get(name)
             if funcVarGetter is not None and name in funcVarGetter:
                 return funcVarGetter.get(name)
-            raise KeyError(f"Unrecognized variable '{name}'")
-        # If-else expression.
+            # Return the associated Function class.
+            if funcGetter is not None and name in funcGetter:
+                return funcGetter.get(name)
+            raise KeyError(f"Unrecognized variable name '{name}'")
+        # Evaluate an if-else expression.
         if kind == "ite":
             condition, then, otherwise = self._args
-            if condition.eval(varGetter,
-                              funcGetter,
-                              funcVarGetter):
-                return then.eval(varGetter,
-                                 funcGetter,
-                                 funcVarGetter)
-            return otherwise.eval(varGetter,
-                                  funcGetter,
-                                  funcVarGetter)
-        # Function call expression.
+            if condition.eval(varGetter, funcGetter, funcVarGetter):
+                return then.eval(varGetter, funcGetter, funcVarGetter)
+            return otherwise.eval(varGetter, funcGetter, funcVarGetter)
+        # Evaluate a function call expression.
         if kind == "call":
-            # to do
-            raise Exception("Not implemented yet")
-        # Unary or binary expression.
+            name, args = self._args
+            if funcGetter is None or name not in funcGetter:
+                raise KeyError(f"Unrecognized function name '{name}'")
+            function = funcGetter.get(name)
+            # Evaluate all the function arguments.
+            evaluatedArgs = [
+                arg.eval(varGetter, funcGetter, funcVarGetter)
+                for arg in args
+            ]
+            return function.body.eval(
+                varGetter,
+                funcGetter,
+                # Build the function variable getter.
+                funcVarGetter={
+                    funcVar: arg
+                    for funcVar, arg in zip(function.parameters, evaluatedArgs)
+                }
+            )
+        # Evaluate a unary or binary expression.
         if kind in self._OPERATORS:
             operator = self._OPERATORS[kind]
-            arity = len(self._args)
-            if arity == 1:
+            # Evaluate a unary expression.
+            if len(self._args) == 1:
                 return operator(self._args[0].eval(varGetter, funcGetter, funcVarGetter))
+            # Evaluate a binary expression.
             left, right = self._args
-            return operator(left.eval(varGetter, funcGetter, funcVarGetter),
-                            right.eval(varGetter, funcGetter, funcVarGetter))
+            return operator(
+                left.eval(varGetter, funcGetter, funcVarGetter),
+                right.eval(varGetter, funcGetter, funcVarGetter)
+            )
 
     @staticmethod
     def createConstExpression(value):
@@ -175,9 +189,23 @@ class Expression(object):
         if kind == "var":
             return self._args[0].split(".")[0]
         if kind == "ite":
-            pass
+            condition, then, otherwise = self._args
+            return {
+                "op": "ite",
+                "if": condition.toJaniRRepresentation(),
+                "then": then.toJaniRRepresentation(),
+                "else": otherwise.toJaniRRepresentation()
+            }
         if kind == "call":
-            pass
+            identifier, args = self._args
+            return {
+                "op": "call",
+                "function": identifier,
+                "args": [
+                    arg.toJaniRRepresentation()
+                    for arg in args
+                ]
+            }
         if kind in self._OPERATORS:
             arity = len(self._args)
             if arity == 1:

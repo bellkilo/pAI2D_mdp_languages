@@ -5,8 +5,9 @@ from variable import Type, Constant, Variable
 from expression import Expression
 from automata import Automata, Edge, EdgeDestination
 from function import Function
+from property import Property
 
-from collections import deque
+# from collections import deque
 import numpy as np
 
 import marmote.core as mc
@@ -125,7 +126,7 @@ class _BaseReader(object):
                 for arg in expression["args"]
             ]
             # Check that the number of arguments corresponds to the function definition.
-            if model.getFunction(name).argsSize != len(args):
+            if len(model.getFunction(name).parameters) != len(args):
                 raise SyntaxError(f"Unmatched argument size for function '{name}'")
             return Expression("call", name, args)
         raise SyntaxError(f"Unrecognized operator '{operator}' for model '{model.name}'")
@@ -421,7 +422,7 @@ class _BaseReader(object):
             # add function dependencies.
             varRefs = self.getVarRefsFromExprStruct(model, function["body"])
             funcDependencies[name] = set(filter(model.containsFunction, varRefs))
-            model.addFunction(Function(name, type, params, body))
+            model.addFunction(Function(name, type, scope, params, body))
         # Check function dependencies.
         self.checkFunctionDependencies(funcDependencies)
 
@@ -484,7 +485,9 @@ class JaniReader(_BaseReader):
         self.parseProperties(model, modelStruct["properties"])
         return model
     # TODO
+    # hard code
     def parseProperties(self, model: JaniModel, properties):
+        scope = ("global", )
         for property in properties:
             if "name" not in property:
                 raise SyntaxError("A property must have a name")
@@ -506,16 +509,35 @@ class JaniReader(_BaseReader):
 
             operator = values["op"]
             if operator == "Pmax" or operator == "Pmin":
+                criterion = operator[1:]
                 if values["exp"]["op"] == "F":
-                    pass
+                    reward = self.parseExpression(model, values["exp"]["exp"], scope)
                 elif values["exp"]["op"] == "U":
-                    pass
+                    if values["exp"]["left"]:
+                        reward = self.parseExpression(model, values["exp"]["right"], scope)
+                    else:
+                        left = self.parseExpression(model, values["exp"]["left"], scope)
+                        right = self.parseExpression(model, values["exp"]["right"], scope)
+                        # ...
+                        reward = Expression(
+                                    "ite",
+                                    left,
+                                    Expression("int", 0),
+                                    Expression(
+                                        "ite",
+                                        right,
+                                        Expression("int", 1),
+                                        Expression("int", -1)
+                                    )
+                                )
                 else:
                     raise Exception(f"Unimplemented")
             elif operator == "Emax" or operator == "Emax":
                 pass
             else:
                 pass
+            model.addProperty(Property(name, criterion, reward))
+            
         pass
 
 
@@ -528,14 +550,34 @@ class JaniRReader(_BaseReader):
             raise SyntaxError("A model must have a name")
         name = modelStruct["name"]
 
+        if "criterion" not in modelStruct:
+            raise SyntaxError(f"Model '{name}' must have a criterion")
+        criterion = modelStruct["criterion"]
+        if criterion not in ["max", "min"]:
+            raise SyntaxError(f"Unsupported criterion '{criterion}'")
+        
         if "type" not in modelStruct:
             raise SyntaxError(f"Model '{name}' must have a type")
         type = modelStruct["type"]
-        # TODO
-        # if type not in ["mdp", "dtmc"]:
-        #     raise Exception(f"Unsupported type '{type}' for model '{name}'")
-        
-        model = JaniRModel(name, type)
+        gamma = 1
+        horizon = float("inf")
+        if type == "DiscountedMDP":
+            if "discounted-factor" not in modelStruct:
+                raise SyntaxError("A discounted MDP must have a discounted factor")
+            gamma = modelStruct["discounted-factor"]
+            if gamma < 0 or gamma >= 1:
+                raise SyntaxError("A discounted factor must be in interval [0, 1)")
+        elif type == "AverageMDP":
+            pass
+        elif type == "TotalRewardMDP":
+            pass
+        elif type == "FiniteHorizonMDP":
+            if "horizon" not in modelStruct:
+                raise SyntaxError("A finite horizon MDP must have a horizon")
+            horizon = modelStruct["horizon"]
+        else:
+            raise Exception("Unimplemented yet!!")
+        model = JaniRModel(name, type, criterion, gamma, horizon)
 
         for action in modelStruct.get("actions", []):
             if "name" not in action:
@@ -558,116 +600,62 @@ class JaniRReader(_BaseReader):
         model.synchronize()
         return model
 
+
 if __name__ == "__main__":
-    # 23425 states, 7 actions, 35101 transitions
-    # python3 reader.py  4,69s user 0,08s system 99% cpu 4,784 total
-    # path = "../../benchmarks/beb.3-4.v1.janir"
-    # reader = Reader(path, { "N": 3 })
-    
-    # 462400 states, 23 actions, 3851520 transitions
-    # python3 reader.py  855,55s user 2,61s system 99% cpu 14:19,54 total
+    ###########################################################
+    # PPDDL instances
+
+    # 462400 states
+    # 22 actions
+    # 3851520 transitions and 0 deadlocks
+    # In total, 3851520 transitions
+    # python3 reader.py  1149,72s user 3,50s system 99% cpu 19:17,56 total
+
     # path = "../../benchmarks/ppddl2jani/zenotravel.4-2-2.v1.jani"
-    # reader = Reader(path, modelParameters={})
+    # reader = JaniReader(path, modelParams={})
 
-    # 87426 states, 6 actions, 159920 transitions
-    # python3 reader.py  59,84s user 0,44s system 99% cpu 1:00,42 total
-    # path = "../../benchmarks/ppddl2jani/exploding-blocksworld.5.v1.jani"
-    # reader = Reader(path, modelParameters={})
+    ###########################################################
+    # Prism instances
 
-    # 128016 states, 4 actions, 240012 transitions
-    # python3 reader.py  26,27s user 0,33s system 99% cpu 26,661 total
-    path = "../../benchmarks/prism2jani/consensus.2.v1.jani"
-    # reader = Reader(path, modelParameters={ "K": 1000 })
+    # 1296 states
+    # 3 actions
+    # 2412 transitions and 0 deadlocks
+    # In total, 2412 transitions
+    # python3 reader.py  0,44s user 0,02s system 99% cpu 0,470 total
+    # path = "../../benchmarks/prism2jani/consensus.2.v1.jani"
+    # reader = JaniReader(path, modelParams={ "K": 10 })
 
-    # 202 states, 5 actions, 490 transitions
-    # python3 reader.py  0,14s user 0,02s system 97% cpu 0,166 total
-    # path = "../../benchmarks/prism2jani/pnueli-zuck.3.v1.jani"
-    # reader = Reader(path, modelParameters={})
+    path = "../../benchmarks/prism2jani/csma.2-2.v1.jani"
+    reader = JaniReader(path, modelParams={})
 
-    # 956 states, 7 actions, 3696 transitions
-    # python3 reader.py  0,36s user 0,02s system 98% cpu 0,387 total
-    # path = "../../benchmarks/prism2jani/philosophers-mdp.3.v1.jani"
-    # reader = Reader(path, modelParameters={})
-
-
-    # emmmmmm
-    # path = "../../benchmarks/prism2jani/csma.2-2.v1.jani"
-    # reader = Reader(path, modelParameters={})
-
-
-
-
-
-    # path = "../../benchmarks/prism2jani/zeroconf_dl.v1.jani"
-    # reader = Reader(path, {"reset": False, "deadline": 5,"N":10, "K":10}) #?????????
-    # path = "../../benchmarks/prism2jani/zeroconf.v1.jani"
-    # reader = Reader(path, {"reset": False,"N":12, "K":6})
-
-
+    # 12828 states
+    # 1 actions
+    # 21795 transitions and 0 deadlocks
+    # In total, 21795 transitions
+    # python3 reader.py  343,71s user 0,28s system 99% cpu 5:44,92 total
     # path = "../../benchmarks/prism2jani/eajs.2.v1.jani"
-    # reader = Reader(path, modelParameters={ "energy_capacity": 5, "B": 3 })
+    # reader = JaniReader(path, modelParams={ "energy_capacity": 100, "B": 100 })
+
+    # 956 states
+    # 6 actions
+    # 3696 transitions and 0 deadlocks
+    # In total, 3696 transitions
+    # python3 reader.py  0,50s user 0,02s system 99% cpu 0,522 total
+    # path = "../../benchmarks/prism2jani/philosophers-mdp.3.v1.jani"
+    # reader = JaniReader(path, modelParams={})
 
 
-
-
-    # 376 states, 5 actions, 1304 transitions
-    # python3 reader.py  0,23s user 0,02s system 98% cpu 0,259 total
-    # path = "../../benchmarks/prism2jani/resource-gathering.v2.jani"
-    # reader = Reader(path, modelParameters={ "energy_capacity": 5, "B": 3 })
-
-
-    # 6854 states, 11 actions, 8809 transitions
-    # python3 reader.py  75,22s user 0,08s system 99% cpu 1:15,40 total
+    # 96894 states
+    # 10 actions
+    # 129170 transitions and 0 deadlocks
+    # In total, 129170 transitions
+    # python3 reader.py  1714,69s user 2,12s system 99% cpu 28:43,84 total
     # path = "../../benchmarks/prism2jani/pacman.v2.jani"
-    # reader = Reader(path, modelParameters={ "MAXSTEPS": 10 })
+    # reader = JaniReader(path, modelParams={ "MAXSTEPS": 15 })
 
-    reader = JaniReader(path, {"K":15})
-    reader.build().writeJaniR("out.txt", None)
-
-    reader = JaniRReader("out.txt", {})
-    model = reader.build()
+    reader.build().writeJaniR("out.txt", "all_before_max")
+    model = JaniRReader("out.txt", {}).build()
     stateSpace, actionSpace, Transitions, Rewards = model.buildTransitionAndReward()
-    mdp = mmdp.TotalRewardMDP("max", stateSpace, actionSpace, Transitions, Rewards)
-    opt = mdp.ValueIteration(1e-10, 500000)
-
-    # # print(model.getInitStates())
-    # states, actions, transitions = model.buildStateSpace()
-    # # iState = model.getInitStates()[0].getLowMemRepr()
-    # print(f"{len(states)} states, {len(actions)} actions, {len(transitions)} transitions")
-
-
-    # stateToIndex = { state: i for i, state in enumerate(states) }
-    # actionToIndex = { action: i for i, action in enumerate(actions) }
-        
-    # n, m = len(states), len(actions)
-        
-    # stateSpace = mc.MarmoteInterval(0, n - 1)
-    # actionSpace = mc.MarmoteInterval(0, m - 1)
-
-    # Transitions = [ mc.SparseMatrix(n) for _ in range(m) ]
-    # Reward = mc.FullMatrix(n, m)
-    # with open("a.txt", "w") as file:
-    #     print("\n".join(map(str, transitions)), file=file)
-    # for (state, nextState, action), array in transitions.items():
-    #     prob, reward = array
-    #     # print(prob, reward)
-        
-    #     # print(reward, np.array([nextState.get("var17"), nextState.get("var19"), nextState.get("var21")]).sum())
-    #     # print(state, nextState, reward)
-    #     actionIndex = actionToIndex[action]
-    #     sIndex = stateToIndex[state]
-    #     sPrimeIndex = stateToIndex[nextState]
-
-    #     Reward.addToEntry(sIndex, actionIndex, reward)
-
-    #     Transitions[actionIndex].addEntry(sIndex, sPrimeIndex, prob)
-
-    # # print(Transitions[0].__repr__())
-    # # print(actionToIndex)
-    # mdp = mmdp.AverageMDP("max", stateSpace, actionSpace, Transitions, Reward)
-    # opt = mdp.ValueIteration(1e-10, 500000)
-    with open("out_2.txt", "w") as file:
-        print(opt, file=file)
-    # print(iState)
-    # # print(stateToIndex)
-    # print(f"initial State = {stateToIndex[iState]}")
+    mdp = mmdp.TotalRewardMDP(model.criterion, stateSpace, actionSpace, Transitions, Rewards)
+    with open("out_1.txt", "w") as file:
+        print(mdp.ValueIteration(1e-10, 1000), file=file)

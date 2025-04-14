@@ -27,22 +27,7 @@ class EdgeDestination(object):
         return {
             "location": next(iter(self.destination)).split(".")[0],
             "probability": { "exp": self.probability.toJaniRRepresentation() },
-            # "reward": { "exp": self._reward.toJaniRRepresentation() },
-            "reward": {
-                "exp": {
-                    "op": "ite",
-                    "if": "finished",
-                    "then": 0.0,
-                    "else": "steps"
-                }
-                # "exp": {
-
-                # "op": "∧",
-                # "left":           {"op": "=", "left": "var7", "right": 1},
-                # "right": {"op": "=", "left": "var6", "right": 2}
-
-                # }
-            },
+            "reward": { "exp": self._reward.toJaniRRepresentation() },
             "assignments": [
                 {
                     "ref": ref.split(".")[0],
