@@ -26,7 +26,7 @@ def build_expression(variables, values):
     return expression
 
 
-def create_jani_model(model, criterion, stateSpace, transitions, actionSpace=None, reward=None):
+def create_jani_model(model, stateSpace, transitions, actionSpace=None, reward=None, criterion = None,):
     num_states = stateSpace.Cardinal()
     if actionSpace is not None:
         num_actions = actionSpace.Cardinal()
@@ -51,16 +51,15 @@ def create_jani_model(model, criterion, stateSpace, transitions, actionSpace=Non
 
     model = {
         "jani-version": 1,
-        "name": "MDP Model",
+        "name": "jani Model written from marmote",
         "type": model.className(),
-        "criterion": criterion,
         "features": ["rewards"],
         "variables": variables,
         "actions": [
             {"name": f"action{i}"} for i in range(num_actions)
         ],
         "automata": [{
-            "name": "MDPProcess",
+            "name": "automata_1",
             "locations": [{"name": "loc0"}],
             "initial-locations": ["loc0"],
             "edges": []
@@ -68,10 +67,13 @@ def create_jani_model(model, criterion, stateSpace, transitions, actionSpace=Non
         "system": {
             "elements": [
                 {
-                    "automaton": "MDPProcess"
+                    "automaton": "automata_1"
                 }]
         }
     }
+
+    if criterion:
+        model.update({"criterion": criterion})
 
     automaton = model["automata"][0]
 
@@ -87,7 +89,10 @@ def create_jani_model(model, criterion, stateSpace, transitions, actionSpace=Non
                     prob = transitions.getEntry(i, j)
                 if prob > 0:
                     if reward is not None:
-                        reward_value = reward.getEntry(i, a)
+                        if isinstance(reward, list):
+                            reward_value = reward[a].getEntry(i, j)
+                        else:
+                            reward_value = reward.getEntry(i, a)
                     else:
                         reward_value = 0
                     destinations.append({
@@ -107,7 +112,7 @@ def create_jani_model(model, criterion, stateSpace, transitions, actionSpace=Non
                     })
             automaton["edges"].append({
                 "location": "loc0",
-                "action": f"act{a}",
+                "action": f"action{a}",
                 "guard":
                     build_expression(variable_names, stateIn)
                 ,
@@ -129,6 +134,7 @@ def save_jani_model_to_file(model, filename):
     with open(filename, 'w') as file:
         file.write(jani_content)
     print(f"Model saved as {filename}")
+
 
 
 if __name__ == "__main__":
