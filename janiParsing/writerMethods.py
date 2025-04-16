@@ -85,9 +85,12 @@ def create_jani_model(model, criterion, stateSpace, transitions, actionSpace=Non
                     prob = transitions[a].getEntry(i, j)
                 else:
                     prob = transitions.getEntry(i, j)
-                if prob > 0:
+                if prob != 0:
                     if reward is not None:
-                        reward_value = reward.getEntry(i, a)
+                        if isinstance(reward, list):
+                            reward_value = reward[a].getEntry(i, j)
+                        else:
+                            reward_value = reward.getEntry(i, a)
                     else:
                         reward_value = 0
                     destinations.append({
