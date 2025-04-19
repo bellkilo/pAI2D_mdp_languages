@@ -238,10 +238,8 @@ class Expression(object):
         if arity == 3:
             if kind == "ite":
                 condition, then, otherwise = self._args
-                return f"if ({condition}) {{then}} else {{otherwise}}"
+                return f"if ({condition}) {{{then}}} else {{{otherwise}}}"
         pass
 
     def __repr__(self):
         return self.__str__()
-
-    

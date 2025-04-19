@@ -90,7 +90,7 @@ def create_jani_model(model, criterion, stateSpace, transitions, actionSpace=Non
                         if isinstance(reward, list):
                             reward_value = reward[a].getEntry(i, j)
                         else:
-                            reward_value = reward.getEntry(i, a)
+                            reward_value = reward.getEntry(i, j)
                     else:
                         reward_value = 0
                     destinations.append({
@@ -104,7 +104,7 @@ def create_jani_model(model, criterion, stateSpace, transitions, actionSpace=Non
                                 "value": int(stateOut[n])
                             } for n in range(dims)
                         ],
-                        "rewards": {
+                        "reward": {
                             "exp": reward_value
                         }
                     })

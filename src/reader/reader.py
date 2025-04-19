@@ -1,19 +1,21 @@
-import json
-
-from model import JaniModel, JaniRModel
-from variable import Type, Constant, Variable
-from expression import Expression
-from automata import Automata, Edge, EdgeDestination
-from function import Function
-from property import Property
-
-# from collections import deque
+from json import loads
 import numpy as np
 
-import marmote.core as mc
-import marmote.mdp as mmdp
+from .model import JaniModel, JaniRModel
+from .variable import Type, Constant, Variable
+from .expression import Expression
+from .automata import Automata, Edge, EdgeDestination
+from .function import Function
+from .property import Property
+from ..exception import *
 
-UNARY_EXPRESSION = {
+try:
+    from typing_extensions import override
+except ImportError:
+    pass
+
+# Set of supported unary operators.
+UNARY_OPERATORS = {
     '¬',
     'floor',
     'ceil',
@@ -22,7 +24,8 @@ UNARY_EXPRESSION = {
     'trc'
 }
 
-BINARY_EXPRESSION = {
+# Set of supported binary operators.
+BINARY_OPERATORS = {
     '∨',
     '∧',
     '⇒',
@@ -40,285 +43,441 @@ BINARY_EXPRESSION = {
     'pow',
     'log',
     'min',
-    'max'
+    'max'  
 }
 
-class _BaseReader(object):
-    def __init__(self, path, modelParams):
+class JaniReader(object):
+    """A reader for JANI (Json Automata Network Interface) model files.
+    Parse the JANI model specification and build the corresponding model objects."""
+
+    def __init__(self, path, modelParams=dict()):
+        """Initialize the JANI reader.
+
+        Parameters:
+            path: Path to target JANI model file.
+
+            modelParams: Dictionary of model parameters (constants).
+        """
         assert isinstance(modelParams, dict)
         self._path = path
         self._modelParams = modelParams
     
     def build(self):
-        """Build the model."""
+        """Parse and build a JANI model from the target file."""
         with open(self._path, "r", encoding="utf-8-sig") as file:
-            modelStruct = json.loads(file.read())
-        return self.parseModel(modelStruct)
-    
-    def parseExpression(self, model, expression, scope, funcParams=set()):
-        # Parse a constant expression.
-        if isinstance(expression, int):
-            return Expression("int", expression)
-        if isinstance(expression, float):
-            return Expression("real", expression)
-        if isinstance(expression, bool):
-            return Expression("bool", expression)
-        # Parse a variable expression.
-        if isinstance(expression, str):
-            # Replace a constant variable with its associated value.
-            if model.isConstantVariable(expression):
-                return self.parseExpression(model, model.getConstantValue(expression), scope)
-            
-            # Parse global variable, local variable and function parameters.
-            if model.isGlobalVariable(expression) or expression in funcParams:
-                name = expression
-            elif len(scope) == 2:
-                _, autamata = scope
-                name = f"{expression}.{autamata}"
-                if not model.isLocalVariable(name):
-                    raise SyntaxError(f"Unrecognized variable name '{expression}' for model '{model.name}'")
-            else:
-                raise SyntaxError(f"Unrecognized variable name '{expression}' for model '{model.name}'")
-            return Expression("var", name)
-        # Parse complex expression.
-        if "op" not in expression:
-            raise SyntaxError("A complex expression must have an operator")
-        operator = expression["op"]
-        # Parse unary expression.
-        if operator in UNARY_EXPRESSION:
-            if "exp" not in expression:
-                raise SyntaxError("An unary expression must have an exp structure")
-            return Expression.reduceExpression(operator,
-                                               self.parseExpression(model, expression["exp"], scope, funcParams))
-        # Parse binary expression.
-        if operator in BINARY_EXPRESSION:
-            if "left" not in expression:
-                raise SyntaxError("A binary expression must have a left structure")
-            if "right" not in expression:
-                raise SyntaxError("A binary expression must have a right structure")
-            return Expression.reduceExpression(operator,
-                                                    self.parseExpression(model, expression["left"], scope, funcParams),
-                                                    self.parseExpression(model, expression["right"], scope, funcParams))
-        # Parse if-else expression.
-        if operator == "ite":
-            if "if" not in expression:
-                raise SyntaxError("An if-else expression must have an if structure")
-            if "then" not in expression:
-                raise SyntaxError("An if-else expression must have a then structure")
-            if "else" not in expression:
-                raise SyntaxError("An if-else expression must have an else structure")
-            return Expression.reduceExpression("ite",
-                                               self.parseExpression(model, expression["if"], scope, funcParams),
-                                               self.parseExpression(model, expression["then"], scope, funcParams),
-                                               self.parseExpression(model, expression["else"], scope, funcParams))
-        # Parse function call expression.
-        if operator == "call":
-            if "function" not in expression:
-                raise SyntaxError("A function call expression must have a function identifier")
-            name = expression["function"]
+            modelStruct = loads(file.read())
+        print("Start parsing")
+        model = self._parseModel(modelStruct)
+        print("Parsing success")
+        return model
 
-            if not model.containsFunction(name):
-                raise SyntaxError(f"Unrecognized function name '{name}' for model '{model.name}'")
-            if "args" not in expression:
-                raise SyntaxError(f"Function '{name}' must have an args structure, even if the function takes no arguments")
-            args = [
-                self.parseExpression(model, arg, scope, funcParams)
-                for arg in expression["args"]
-            ]
-            # Check that the number of arguments corresponds to the function definition.
-            if len(model.getFunction(name).parameters) != len(args):
-                raise SyntaxError(f"Unmatched argument size for function '{name}'")
-            return Expression("call", name, args)
-        raise SyntaxError(f"Unrecognized operator '{operator}' for model '{model.name}'")
+    def _parseModel(self, modelStruct):
+        """Parse the root model structure."""
+        if "name" not in modelStruct:
+            raise JaniSyntaxError("Model must have a name")
+        name = modelStruct["name"]
+
+        if "type" not in modelStruct:
+            raise JaniSyntaxError(f"The type of model '{name}' must be specified")
+        type = modelStruct["type"]
+        if type not in ["mdp", "dtmc"]:
+            raise UnsupportedFeatureError(f"Unsupported type '{type}'\n"
+                                          "Only 'mdp' and 'dtmc' are supported")
+        model = JaniModel(name, type)
+
+        self._parseActions(model, modelStruct.get("actions", []))
+        if "system" not in modelStruct:
+            raise JaniSyntaxError(f"Model '{name}' must have a system composition")
+        self._parseSystem(model, modelStruct["system"])
+        self._parseConstants(model, modelStruct.get("constants", []))
+        self._parseVariables(model, modelStruct.get("variables", []), ("global", ))
+        self._parseFunctions(model, modelStruct.get("functions", []), ("global", ))
+
+        if "automata" not in modelStruct:
+            raise JaniSyntaxError(f"Model '{name}' must have an automata composition")
+        for autamata in modelStruct["automata"]:
+            model.addAutomata(self._parseAutomata(model, autamata))
+        
+        if "properties" not in modelStruct:
+            pass
+        else:
+            self._parseProperties(model, modelStruct["properties"])
+        model.synchronize()
+        return model
+
+    def _parseActions(self, model: JaniModel, actions):
+        """Parse action declarations."""
+        for act in actions:
+            if "name" not in act:
+                raise JaniSyntaxError("Action must have a name")
+            model.addAction(act["name"])
     
-    def parseType(self, model, type, scope):
-        # Parse basic type definition.
+    def _parseSystem(self, model: JaniModel, system):
+        """Parse system composition structure."""
+        automataIndices = dict()
+        preSyncActionss = list()
+        if "elements" not in system:
+            raise JaniSyntaxError("System composition must contain at least one automata")        
+        for idx, elem in enumerate(system["elements"]):
+            if "automaton" not in elem:
+                raise JaniSyntaxError("System element must have an 'automaton' field")
+            automataIndices[elem["automaton"]] = idx
+        
+        if "syncs" in system:
+            for idx, sync in enumerate(system["syncs"]):
+                preSyncActions = []
+                for act in sync.get("synchronise", []):
+                    if act is not None and not model.containsAction(act):
+                        raise JaniSyntaxError(f"Undefined action '{act}' reference in synchronise")
+                    preSyncActions.append(act)
+                preSyncActionss.append((sync.get("result", f"act{idx}.sync"),
+                                        preSyncActions))
+        model.setSystemInformation(automataIndices, preSyncActionss)
+
+    def _parseExpression(self, model: JaniModel, expr, scope, funcParams=set()):
+        """Parse expression.
+        
+        Parameters:
+            model: The current construction model.
+
+            expr: The Jani expression to parse.
+
+            scope: The current scope.
+
+            funcParams: Function parameters when analyzing the function body, it's useful
+                to distinguish between function parameter names and the names of other variables.
+        
+        Returns:
+            out: The corresponding Expression object.
+        """
+        # Parse primitive constant expressions.
+        if isinstance(expr, (int, float, bool)):
+            return Expression.createConstExpression(expr)
+        # Parse variable references.
+        if isinstance(expr, str):
+            if model.isConstantVariable(expr):
+                return Expression.createConstExpression(model.getConstantValue(expr))
+            if model.isGlobalVariable(expr) or expr in funcParams:
+                name = expr
+            else:
+                assert len(scope) == 2
+                name = f"{expr}.{scope[1]}"
+                if not model.containsVariable(name):
+                    raise JaniSyntaxError(f"Unknown variable '{name}' reference")
+            return Expression("var", name)
+        # Parse complex expressions.
+        if "op" not in expr:
+            raise JaniSyntaxError("Invalid expression structure.\n"
+                                  "Complex expression must contain a 'op' field")
+        operator = expr["op"]
+        if operator in UNARY_OPERATORS:
+            if "exp" not in expr:
+                raise JaniSyntaxError("Unary expression must have an 'exp' field")
+            return Expression.reduceExpression(operator,
+                                               self._parseExpression(model, expr["exp"], scope, funcParams))
+        if operator in BINARY_OPERATORS:
+            if "left" not in expr or "right" not in expr:
+                raise JaniSyntaxError("Binary expression must have a 'left' field and a 'right' field")
+            return Expression.reduceExpression(operator,
+                                               self._parseExpression(model, expr["left"], scope, funcParams),
+                                               self._parseExpression(model, expr["right"], scope, funcParams))
+        # Parse if-then-else expressions.
+        if operator == "ite":
+            if "if" not in expr or "then" not in expr or "else" not in expr:
+                raise JaniSyntaxError("If-then-else expression must have an 'if' field, "
+                                      "a 'then' field and an 'else' field")
+            return Expression.reduceExpression("ite",
+                                               self._parseExpression(model, expr["if"], scope, funcParams),
+                                               self._parseExpression(model, expr["then"], scope, funcParams),
+                                               self._parseExpression(model, expr["else"], scope, funcParams))
+        # Parse function calls.
+        if operator == "call":
+            if "function" not in expr:
+                raise JaniSyntaxError("Missing calling function identifier")
+            name = expr["function"]
+            if not model.containsFunction(name):
+                raise JaniSyntaxError(f"Unknown function '{name}' reference")
+            
+            if "args" not in expr:
+                raise JaniSyntaxError(f"Function '{name}' must have an 'args' field, "
+                                      "even if the function takes no arguments")
+            args = [ self._parseExpression(model, arg, scope, funcParams) for arg in expr["args"] ]
+            if len(model.getFunction(name).parameters) != len(args):
+                raise JaniSyntaxError(f"Mismatched argument size for function '{name}'")
+            return Expression("call", name, args)
+        raise UnsupportedFeatureError(f"Unsupported operator '{operator}'")
+
+    def _parseType(self, model: JaniModel, type, scope):
+        """Parse type definition."""
+        # Parse primitive types.
         if isinstance(type, str):
             if type not in ["int", "real", "bool"]:
-                raise Exception(f"Unsupported type '{type}'")
+                raise UnsupportedFeatureError(f"Unsupported type '{type}'")
             return Type(type)
-        # Parse complex (bounded) type definition.
+        # Parse complex types.
         if "kind" not in type:
-            raise SyntaxError("A complex type must have a kind")
+            raise JaniSyntaxError("Complex type must have a 'kind' field")
         kind = type["kind"]
         if kind != "bounded":
-            raise Exception(f"Unsupported kind '{kind}' for model '{model.name}'")
-        
+            raise UnsupportedFeatureError(f"Unsupported kind '{kind}'.\n"
+                                          "Only 'bounded' type are supported.")
         if "base" not in type:
-            raise SyntaxError("A complex type must have a base")
+            raise JaniSyntaxError("Complex type must have a 'base' field")
         base = type["base"]
         if base not in ["int", "real"]:
-            raise Exception(f"Unsupproted base '{base}' for model '{model.name}'")
-        
+            raise UnsupportedFeatureError(f"Unsupported base '{base}'.\n",
+                                          "Only 'int' and 'real' are supported")
         if "lower-bound" not in type:
-            raise SyntaxError("A complex type (bounded) must have a lower bound")
+            raise JaniSyntaxError("Complex type (bounded) must have a 'lower-bound' field")
         if "upper-bound" not in type:
-            raise SyntaxError("A complex type (bounded) must have a upper bound")
-        lowerBound = self.parseExpression(model, type["lower-bound"], scope)
-        upperBound = self.parseExpression(model, type["upper-bound"], scope)
-        if not lowerBound.isConstExpression():
-            raise Exception("Lower bound must be a constant expression.")
-        if not upperBound.isConstExpression():
-            raise Exception("Upper bound must be a constant expression.")
-        lowerBound = lowerBound.eval()
-        upperBound = upperBound.eval()
-        return Type(base, boundaries=(lowerBound, upperBound))
-    
-    def parseConstants(self, model, constants):
-        scope = ("global",)
-        for constant in constants:
-            if "name" not in constant:
-                raise SyntaxError("A constant variable must have a name")
-            name = constant["name"]
+            raise JaniSyntaxError("Complex type (bounded) must have a 'upper-bound' field")
+        lower = self._parseExpression(model, type["lower-bound"], scope)
+        upper = self._parseExpression(model, type["upper-bound"], scope)
+        if not lower.isConstExpression() or not upper.isConstExpression():
+            raise RequiredConstantExpressionError("Type bounds must be constant expression")
+        lower = lower.eval()
+        upper = upper.eval()
+        return Type(base, (lower, upper))
 
-            if "type" not in constant:
-                raise SyntaxError(f"Constant variable '{name}' must have a type structure")
-            type = self.parseType(model, constant["type"], scope)
+    def _parseConstants(self, model: JaniModel, constants):
+        """Parse constant declarations."""
+        for const in constants:
+            if "name" not in const:
+                raise JaniSyntaxError("Constant must have a name")
+            name = const["name"]
 
-            if "value" not in constant:
-                # If the value expression is not given, then it must be given as the model parameters.
+            if "type" not in const:
+                raise JaniSyntaxError(f"The type of constant '{name}' must be specified")
+            type = self._parseType(model, const["type"], ("global", ))
+
+            if "value" not in const:
                 if name not in self._modelParams:
-                    raise Exception(f"Missing constant value '{name}' for model '{model.name}'")
+                    raise MissingModelParameterError(f"Missing constant value '{name}'")
                 value = self._modelParams[name]
             else:
-                value = self.parseExpression(model, constant["value"], scope)
+                value = self._parseExpression(model, const["value"], ("global", ))
                 if not value.isConstExpression():
-                    raise Exception(f"Constant value must ba a constant expression for variable '{name}'")
+                    raise RequiredConstantExpressionError(f"Constant '{name}' value must be constant expression")
                 value = value.eval()
             model.addConstant(Constant(name, type, value))
-    
-    def parseVariables(self, model, variables, scope):
-        isGlobalScope = scope[0] == "global"
-        for variable in variables:
-            if "name" not in variable:
-                raise SyntaxError("A variable must have a name")
-            name = variable["name"]
-            if not isGlobalScope:
+
+    def _parseVariables(self, model: JaniModel, variables, scope):
+        """Parse variables declarations."""
+        isGlobal = scope[0] == "global"
+        for var in variables:
+            if "name" not in var:
+                raise JaniSyntaxError("Variable must have a name")
+            name = var["name"]
+            if not isGlobal:
+                assert len(scope) == 2
+                name = f"{name}.{scope[1]}"
+
+            if "type" not in var:
+                raise JaniSyntaxError(f"The type of variable '{name}' must be specified")
+            type = self._parseType(model, var["type"], scope)
+
+            transient = var.get("transient", False)
+
+            initValue = None
+            if "initial-value" in var:
+                initValue = self._parseExpression(model, var["initial-value"], scope)
+                if not initValue.isConstExpression():
+                    raise RequiredConstantExpressionError(f"Variable '{name}' initial value must be constant expression")
+                initValue = initValue.eval()
+            elif transient:
+                raise JaniSyntaxError(f"Transient variable '{name}' must have an initial value")
+            elif not type.hasBounds() and type.type == "real":
+                raise JaniRRequirementError(f"Unbounded and real variable '{name}' must have an initial value")
+            model.addVariable(Variable(name, type, scope, initValue, transient))
+
+    def _parseFunctions(self, model: JaniModel, functions, scope):
+        """Parse function declarations and definitions."""
+        isGlobal = scope[0] == "global"
+        # First parse - declare all functions.
+        for func in functions:
+            if "name" not in func:
+                raise JaniSyntaxError("Function must have a name")
+            name = func["name"]
+            if not isGlobal:
+                assert len(scope) == 2
+                name = f"{name}.{scope[1]}"
+
+            if "type" not in func:
+                raise JaniSyntaxError(f"The type of function '{name}' must be specified")
+            type = self._parseType(model, func["type"], scope)
+
+            if "parameters" not in func:
+                raise JaniSyntaxError(f"Function '{name}' must have a 'parameters' structure")
+            params = self._parseParameters(model, func["parameters"], scope, name)
+            model.declareFunction(Function(name, type, scope, params))
+        
+        # Second parse - process definition and check dependencies.
+        dependencies = dict()
+        for func in functions:
+            name = func["name"]
+            if not isGlobal:
                 name = f"{name}.{scope[1]}"
             
-            if "type" not in variable:
-                raise SyntaxError(f"Variable '{name}' must have a type structure")
-            type = self.parseType(model, variable["type"], scope)
+            params = model.getFunction(name).parameters
+            if "body" not in func:
+                raise JaniSyntaxError(f"Function '{name}' must have a 'body' field")
+            body = self._parseExpression(model, func["body"], scope, params)
 
-            transient = variable.get("transient", False)
+            varRefs = self._getVarRefsFromExprStruct(model, func["body"])
+            dependencies[name] = set(filter(model.containsFunction, varRefs))
+            model.addFunctionBody(name, body)
+        self._checkFuncDependencies(dependencies)
 
-            if "initial-value" not in variable:
-                if not transient and (type.boundaries is None or type.type == "real"):
-                    raise SyntaxError(f"Variable without initial value must be bounded")
-                initValue = None
-            else:
-                initValue = self.parseExpression(model, variable["initial-value"], scope)
-                if not initValue.isConstExpression():
-                    raise Exception(f"Initial value must be a constant expression for variable '{name}'")
-                initValue = initValue.eval()
-            model.addVariable(Variable(name, type, scope, initValue, transient))
+    def _parseParameters(self, model: JaniModel, parameters, scope, funcName):
+        """Parse function parameters."""
+        paramMap = dict()
+        for param in parameters:
+            if "name" not in param:
+                raise JaniSyntaxError("Function parameter must have a name")
+            name = param["name"]
+            if name in paramMap:
+                raise JaniSyntaxError(f"Duplicate function parameter '{name}' in function '{funcName}'")
+            if model.containsVariable(name):
+                raise JaniSyntaxError(f"Function parameter '{name}' conflicts with existing variable")
+                
+            if "type" not in param:
+                raise JaniSyntaxError(f"The type of function parameter '{name}' must be specified")
+            type = self._parseType(model, param["type"], scope)
+            paramMap[name] = type
+        return paramMap
     
-    def getVarRefsFromExprStruct(self, model, targetExpression):
-        """Return all variable references in an expression structure."""
+    def _getVarRefsFromExprStruct(self, model: JaniModel, tarExpr):
+        """Get all variable references in an expression."""
         varRefs = set()
-        stack = [targetExpression]
+        stack = [ tarExpr ]
         while stack:
-            expression = stack.pop()
-            if isinstance(expression, str) and not model.isConstantVariable(expression):
-                varRefs.add(expression)
-            elif isinstance(expression, dict):
-                operator = expression["op"]
-                if operator in UNARY_EXPRESSION:
-                    stack.append(expression["exp"])
-                elif operator in BINARY_EXPRESSION:
-                    stack.append(expression["left"])
-                    stack.append(expression["right"])
+            expr = stack.pop()
+            if isinstance(expr, str) and not model.isConstantVariable(expr):
+                varRefs.add(expr)
+            elif isinstance(expr, dict):
+                operator = expr["op"]
+                if operator in UNARY_OPERATORS:
+                    stack.append(expr["exp"])
+                elif operator in BINARY_OPERATORS:
+                    stack.append(expr["left"])
+                    stack.append(expr["right"])
                 elif operator == "ite":
-                    stack.append(expression["if"])
-                    stack.append(expression["then"])
-                    stack.append(expression["else"])
+                    stack.append(expr["if"])
+                    stack.append(expr["then"])
+                    stack.append(expr["else"])
                 elif operator == "call":
-                    stack.append(expression["function"])
-                    stack.extend(expression["args"])
+                    stack.append(expr["function"])
+                    stack.extend(expr["args"])
         return varRefs
 
-    def parseLocations(self, model, locations, scope):
-        _, autamata = scope
-        locs = dict()
-        for location in locations:
-            if "name" not in location:
-                raise SyntaxError("A location must have a name")
-            name = location["name"]
-            name = f"{name}.{autamata}"
+    def _checkFuncDependencies(self, dependencies):
+        """Check function dependencies."""
+        def hasCircularDependency(v, status):
+            if status[v] is not None:
+                return not status[v]
+            status[v] = False
+            for u in dependencies[v]:
+                if hasCircularDependency(u, status):
+                    return True
+            status[v] = True
+            return False
+        status = { v: None for v in dependencies }
+        for v in dependencies:
+            if status[v] is None and hasCircularDependency(v, status):
+                raise JaniSyntaxError(f"Circular dependency in function '{v}'")
+
+    def _parseLocations(self, model: JaniModel, locations, scope):
+        """Parse automata locations."""
+        _, automata = scope
+        locMap = dict()
+        for loc in locations:
+            if "name" not in loc:
+                raise JaniSyntaxError("Location must have a name")
+            name = loc["name"]
+            name = f"{name}.{automata}"
 
             transientValues = dict()
-            for transientValue in location.get("transient-values", []):
-                if "ref" not in transientValue:
-                    raise SyntaxError("A transient value structure must have a reference")
-                ref = transientValue["ref"]
-                if model.isLocalVariable(ref):
-                    ref = f"{ref}.{autamata}"
+            for transValue in loc.get("transient-values", []):
+                if "ref" not in transValue:
+                    raise JaniSyntaxError("The 'assignment' structure must have a 'ref' field")
+                ref = transValue["ref"]
+                if not model.isGlobalVariable(ref):
+                    ref = f"{ref}.{automata}"
+                if not model.containsVariable(ref):
+                    raise JaniSyntaxError(f"Unknown variable '{ref}' reference in location '{name}'")
                 if not model.isTransientVariable(ref):
-                    raise SyntaxError(f"Non-transient variable reference '{ref}'")
+                    raise JaniSyntaxError(f"Contains non-transient variable reference '{ref}'")
                 
-                if "value" not in transientValue:
-                    raise SyntaxError("A transient value structure must have a value expression")
-                value = transientValue["value"]
+                if "value" not in transValue:
+                    raise JaniSyntaxError(f"The 'assignment' structure must have a 'value' field")
+                value = value = self._parseExpression(model, transValue["value"], scope)
 
-                # The value expression for a transient value structure must not refer to another transient variable.
-                varRefs = self.getVarRefsFromExprStruct(model, value)
+                varRefs = self._getVarRefsFromExprStruct(model, transValue["value"])
                 if varRefs and np.all(list(map(model.isTransientVariable, varRefs))):
-                    raise SyntaxError(f"A value expression for a transient value must not refer to another transient variable")
-                value = self.parseExpression(model, value, scope)
+                    raise JaniSyntaxError("Value expression for a 'transient-values' structure must not refer to another transient variable")
                 transientValues[ref] = value
-            locs[name] = transientValues
-        return locs
+            locMap[name] = transientValues
+        return locMap
 
-    def parseAutomata(self, model, automata):
+    def _parseAutomata(self, model: JaniModel, automata):
+        """Parse automata."""
         if "name" not in automata:
-            raise SyntaxError("An automata must have a name")
+            raise JaniSyntaxError("Automata must have a name")
         name = automata["name"]
         scope = ("local", name)
 
-        self.parseVariables(model, automata.get("variables", []), scope)
-        self.parseFunctions(model, automata.get("functions", []), scope)
+        self._parseVariables(model, automata.get("variables", []), scope)
+        self._parseFunctions(model, automata.get("functions", []), scope)
 
         if "locations" not in automata:
-            raise SyntaxError(f"Automata '{name}' must have a locations structure")
-        locs = self.parseLocations(model, automata["locations"], scope)
+            raise JaniSyntaxError(f"Automata '{name}' must have a 'locations' structure")
+        locs = self._parseLocations(model, automata["locations"], scope)
 
         if "initial-locations" not in automata:
-            raise SyntaxError(f"Automata '{name}' must have a initial-locations structure")
-        initLocs = automata["initial-locations"]
-        if len(initLocs) == 0:
-            raise SyntaxError(f"Automata '{name}' must have at least 1 initial location")
-        if len(initLocs) > 1:
-            raise SyntaxError(f"Model '{model.name}' does not support multiple initial location")
-        initLoc = { f"{initLocs[0]}.{name}"}
-
+            raise JaniSyntaxError(f"Automata '{name}' must have a 'initial-locations' field")
+        initLoc = automata["initial-locations"]
+        if len(initLoc) == 0:
+            raise JaniSyntaxError(f"Automata '{name}' must have at least one initial location")
+        if len(initLoc) > 1:
+            raise JaniRRequirementError(f"Automata '{name}' must have only one initial location")
+        initLoc = { f"{initLoc[0]}.{name}" }
+        if not initLoc.issubset(locs):
+            raise JaniSyntaxError(f"Unknown location '{next(iter(initLoc))}' in automata '{name}'")
+        
         if "edges" not in automata:
-            raise SyntaxError(f"Automata '{name}' must have an edges structure")
-        edges = [ self.parseEdge(model, edge, scope) for edge in automata["edges"] ]
-        model.addAutomata(Automata(name, locs, initLoc, edges))
+            raise JaniSyntaxError(f"Automara '{name}' must have an 'edges' structure")
+        edges = [ self._parseEdge(model, edge, scope) for edge in automata["edges"] ]
+        return Automata(name, locs, initLoc, edges)
 
-    def parseEdge(self, model, edge, scope):
+    def _parseEdge(self, model: JaniModel, edge, scope):
+        """Parse automata edge."""
         _, automata = scope
         if "location" not in edge:
-            raise SyntaxError(f"An edge in automata '{automata}' must have a location")
+            raise JaniSyntaxError(f"Edge in automata '{automata}' must have a 'location' field")
         src = edge["location"]
         src = { f"{src}.{automata}" }
 
-        action = edge.get("action", "silentAction")
+        if "action" not in edge:
+            act = "silent-action"
+        else:
+            act = edge["action"]
+            if not model.containsAction(act):
+                raise JaniSyntaxError(f"Unknown action '{act}' in automata '{automata}'")
 
         if "guard" not in edge:
             guard = Expression("bool", True)
         else:
             guard = edge["guard"]
             if "exp" not in guard:
-                raise SyntaxError(f"A guard structure in automata '{automata}' must have a exp structure")
-            guard = self.parseExpression(model, guard["exp"], scope)
+                raise JaniSyntaxError(f"Guard in automata '{automata}' must have an 'exp' field")
+            guard = self._parseExpression(model, guard["exp"], scope)
         
         if "destinations" not in edge:
-            raise SyntaxError(f"An edge in automata '{automata}' must have a destinations structure")
+            raise JaniSyntaxError(f"Edge in automata '{automata}' must have a 'destinations' structure")
         edgeDests = list()
         for destination in edge["destinations"]:
             if "location" not in destination:
-                raise SyntaxError(f"An edge destination in automata '{automata}' must have a location")
+                raise JaniSyntaxError("Edge destination in automata '{automata}' must have a 'location' field")
             dest = destination["location"]
             dest = { f"{dest}.{automata}" }
 
@@ -327,166 +486,29 @@ class _BaseReader(object):
             else:
                 prob = destination["probability"]
                 if "exp" not in prob:
-                    raise SyntaxError(f"A probability structure in automata '{automata}' must have a exp structure")
-                prob = self.parseExpression(model, prob["exp"], scope)
-            
-            if "reward" not in destination:
-                reward = Expression("int", 0)
-            else:
-                reward = destination["reward"]
-                if "exp" not in reward:
-                    raise SyntaxError(f"A reward structure in automata '{automata}' must have a exp structure")
-                reward = self.parseExpression(model, reward["exp"], scope)
+                    raise JaniSyntaxError("The 'probability' structure must have a 'exp' field")
+                prob = self._parseExpression(model, prob["exp"], scope)
             
             assgns = dict()
             for assgn in destination.get("assignments", []):
                 if "ref" not in assgn:
-                    raise SyntaxError(f"An assignment structure in automata '{automata}' must have a reference")
+                    raise JaniSyntaxError("The 'assignment' structure must have a 'ref' field")
                 ref = assgn["ref"]
-                if model.isLocalVariable(ref):
+                if not model.isGlobalVariable(ref):
                     ref = f"{ref}.{automata}"
+                if not model.containsVariable(ref):
+                    raise JaniSyntaxError(f"Unknown variable '{ref}' reference in automata '{automata}'")
 
                 if "value" not in assgn:
-                    raise SyntaxError(f"An assignment structure in automata '{automata}' must have a value expression")
-                value = self.parseExpression(model, assgn["value"], scope)
+                    raise JaniSyntaxError(f"The 'assignment' structure must have a 'value' field")
+                value = self._parseExpression(model, assgn["value"], scope)
                 assgns[ref] = value
-            edgeDests.append(EdgeDestination(dest, prob, assgns, reward))
-        return Edge(src, action, guard, edgeDests)
-
-    def parseSystem(self, model, system):
-        automataMapIndex = dict()
-        syncActionsList = list()
-        if "elements" not in system:
-            raise SyntaxError("System must have an elements structure")
-        for i, element in enumerate(system["elements"]):
-            if "automaton" not in element:
-                raise SyntaxError("A element structure must have an automaton structure")
-            automataMapIndex[element["automaton"]] = i
-        
-        if "syncs" in system:
-            for i, sync in enumerate(system["syncs"]):
-                result = sync.get("result", f"silentAction_{i}.sync")
-                syncActions = []
-                for action in sync.get("synchronise", []):
-                    if action is not None and not model.containsAction(action):
-                        raise SyntaxError(f"Unrecognized action '{action}' for model '{model.name}'")
-                    syncActions.append(action)
-                syncActionsList.append((result, syncActions))
-        model.setSystemInformation(automataMapIndex, syncActionsList)
-
-    def parseFunctions(self, model, functions, scope):
-        isGlobalScope = scope[0] == "global"
-        # First parse that adds all function declarations.
-        for function in functions:
-            if "name" not in function:
-                raise SyntaxError("A function must have a name")
-            name = function["name"]
-            if not isGlobalScope:
-                assert len(scope) == 2
-                name = f"{name}.{scope[1]}"
-            model.declareFunction(name)
-        # Second parse that adds the function definitions.
-        funcDependencies = dict()
-        for function in functions:
-            name = function["name"]
-            if not isGlobalScope:
-                name = f"{name}.{scope[1]}"
-            
-            if "type" not in function:
-                raise SyntaxError(f"Function '{name}' must have a type structure")
-            type = self.parseType(model, function["type"], scope)
-
-            if "parameters" not in function:
-                raise SyntaxError(f"Function '{name}' must have a parameters structure, "
-                                  "even if function takes no arguments")
-            # Parse function parameters.
-            params = dict()
-            for parameter in function["parameters"]:
-                if "name" not in parameter:
-                    raise SyntaxError(f"Function parameter must have a name")
-                paramName = parameter["name"]
-                if paramName in params:
-                    raise SyntaxError(f"Duplicate parameter '{paramName}' in function '{name}'")
-                if model.containsVariable(paramName):
-                    raise SyntaxError(f"Parameter name '{paramName}' conflicts with existing variable")
-                
-                if "type" not in parameter:
-                    raise SyntaxError(f"Function parameter '{paramName}' must have a type structure")
-                params[paramName] = self.parseType(model, parameter["type"], scope)
-            # Parse function body expression.
-            
-            if "body" not in function:
-                raise SyntaxError(f"Function '{name}' must have a body structure")
-            body = self.parseExpression(model, function["body"], scope, params)
-
-            # add function dependencies.
-            varRefs = self.getVarRefsFromExprStruct(model, function["body"])
-            funcDependencies[name] = set(filter(model.containsFunction, varRefs))
-            model.addFunction(Function(name, type, scope, params, body))
-        # Check function dependencies.
-        self.checkFunctionDependencies(funcDependencies)
-
-    def checkFunctionDependencies(self, funcDependencies):
-        """Check function dependencies."""
-        def hasCircularDependency(v, status):
-            if status[v] is not None:
-                return not status[v]
-            status[v] = False
-            for u in funcDependencies[v]:
-                if hasCircularDependency(u, status):
-                    return True
-            status[v] = True
-            return False
-        status = { v: None for v in funcDependencies }
-        for v in funcDependencies:
-            if status[v] is None and hasCircularDependency(v, status):
-                raise Exception(f"Detect a circular dependency in function '{v}'")
-
-    def parseModel(self, modelStruct):
-        pass
+            edgeDests.append(EdgeDestination(dest, prob, assgns))
+        return Edge(src, act, guard, edgeDests)
 
 
-class JaniReader(_BaseReader):
-    def __init__(self, path, modelParams):
-        super().__init__(path, modelParams)
-
-    def parseModel(self, modelStruct):
-        if "name" not in modelStruct:
-            raise SyntaxError("A model must have a name")
-        name = modelStruct["name"]
-
-        if "type" not in modelStruct:
-            raise SyntaxError(f"Model '{name}' must have a type")
-        type = modelStruct["type"]
-        if type not in ["mdp", "dtmc"]:
-            raise Exception(f"Unsupported type '{type}' for model '{name}'")
-        
-        model = JaniModel(name, type)
-
-        for action in modelStruct.get("actions", []):
-            if "name" not in action:
-                raise SyntaxError("An action must have a name")
-            model.addAction(action["name"])
-        
-        if "system" not in modelStruct:
-            raise SyntaxError(f"Model '{name}' must have a system structure")
-        self.parseSystem(model, modelStruct["system"])
-
-        self.parseConstants(model, modelStruct.get("constants", []))
-        self.parseVariables(model, modelStruct.get("variables", []), ("global", ))
-        self.parseFunctions(model, modelStruct.get("functions", []), ("global", ))
-
-        if "automata" not in modelStruct:
-            raise SyntaxError(f"Model '{name}' must have a automata structure")
-        for automata in modelStruct["automata"]:
-            self.parseAutomata(model, automata)
-        
-        # TODO
-        self.parseProperties(model, modelStruct["properties"])
-        return model
     # TODO
-    # hard code
-    def parseProperties(self, model: JaniModel, properties):
+    def _parseProperties(self, model: JaniModel, properties):
         scope = ("global", )
         for property in properties:
             if "name" not in property:
@@ -507,100 +529,188 @@ class JaniReader(_BaseReader):
                 raise SyntaxError()
             values = propertyExpression["values"]
 
-            operator = values["op"]
-            if operator == "Pmax" or operator == "Pmin":
-                criterion = operator[1:]
-                if values["exp"]["op"] == "F":
-                    reward = self.parseExpression(model, values["exp"]["exp"], scope)
-                elif values["exp"]["op"] == "U":
-                    if values["exp"]["left"]:
-                        reward = self.parseExpression(model, values["exp"]["right"], scope)
-                    else:
-                        left = self.parseExpression(model, values["exp"]["left"], scope)
-                        right = self.parseExpression(model, values["exp"]["right"], scope)
-                        # ...
-                        reward = Expression(
-                                    "ite",
-                                    left,
-                                    Expression("int", 0),
-                                    Expression(
-                                        "ite",
-                                        right,
-                                        Expression("int", 1),
-                                        Expression("int", -1)
-                                    )
-                                )
-                else:
-                    raise Exception(f"Unimplemented")
-            elif operator == "Emax" or operator == "Emax":
-                pass
-            else:
-                pass
-            model.addProperty(Property(name, criterion, reward))
-            
-        pass
-
-
-class JaniRReader(_BaseReader):
-    def __init__(self, path, modelParameters):
-        super().__init__(path, modelParameters)
+            criterion, mdpType, fs, reward = self.parsePropExprValues(model, values, scope)
+            print(name, criterion, mdpType, fs, reward)
+            model.addProperty(Property(name, criterion, mdpType, fs, reward))
     
-    def parseModel(self, modelStruct):
+    def parsePropExprValues(self, model, propExprValues, scope):
+        operator = propExprValues["op"]
+        if operator in ["Pmax", "Pmin"]:
+            criterion = operator[1:]
+            if propExprValues["exp"]["op"] == "F":
+                rewardExpr = self._parseExpression(model, propExprValues["exp"]["exp"], scope)
+                terminalStateExpr = rewardExpr
+            elif propExprValues["exp"]["op"] == "U":
+                if propExprValues["exp"]["left"] == True:
+                    rewardExpr = self._parseExpression(model, propExprValues["exp"]["right"], scope)
+                    terminalStateExpr = rewardExpr
+                else:
+                    leftExpr = self._parseExpression(model, propExprValues["exp"]["left"], scope)
+                    rightExpr = self._parseExpression(model, propExprValues["exp"]["right"], scope)
+                    rewardExpr = rightExpr
+                    terminalStateExpr = Expression("∨",
+                                                   Expression("¬", leftExpr),
+                                                   rightExpr)
+            return criterion, "TotalRewardMDP", terminalStateExpr, rewardExpr
+        if operator in ["Emax", "Emin"]:
+            criterion = operator[1:]
+            reach = self._parseExpression(model, propExprValues["reach"], scope)
+            exp = self._parseExpression(model, propExprValues["exp"], scope)
+            return criterion, "AverageMDP", reach, exp
+        
+        if operator in UNARY_OPERATORS:
+            return self.parsePropExprValues(model, propExprValues["exp"], scope)
+        if operator in BINARY_OPERATORS:
+            # TODO
+            return self.parsePropExprValues(model, propExprValues["left"], scope)
+        raise Exception()
+
+
+class JaniRReader(JaniReader):
+    def __init__(self, path, modelParams=dict()):
+        super().__init__(path, modelParams)
+    
+    @override
+    def _parseModel(self, modelStruct):
+        """Parse the root model structure."""
         if "name" not in modelStruct:
-            raise SyntaxError("A model must have a name")
+            raise JaniSyntaxError("Model must have a name")
         name = modelStruct["name"]
 
-        if "criterion" not in modelStruct:
-            raise SyntaxError(f"Model '{name}' must have a criterion")
-        criterion = modelStruct["criterion"]
-        if criterion not in ["max", "min"]:
-            raise SyntaxError(f"Unsupported criterion '{criterion}'")
-        
         if "type" not in modelStruct:
-            raise SyntaxError(f"Model '{name}' must have a type")
+            raise JaniSyntaxError(f"The type of model '{name}' must be specified")
         type = modelStruct["type"]
-        gamma = 1
-        horizon = float("inf")
+        gamma = horizon = None
         if type == "DiscountedMDP":
-            if "discounted-factor" not in modelStruct:
-                raise SyntaxError("A discounted MDP must have a discounted factor")
-            gamma = modelStruct["discounted-factor"]
+            if "gamma" not in modelStruct:
+                raise JaniRSyntaxError("Discounted MDP must have a 'gamme' (discounted factor) field")
+            gamma = modelStruct["gamma"]
             if gamma < 0 or gamma >= 1:
-                raise SyntaxError("A discounted factor must be in interval [0, 1)")
+                raise JaniRSyntaxError("Discounted factor must be in range [0, 1)")
         elif type == "AverageMDP":
-            pass
+            pass # Do nothing.
         elif type == "TotalRewardMDP":
-            pass
+            pass # Do nothing.
         elif type == "FiniteHorizonMDP":
+            if "gamma" not in modelStruct:
+                raise JaniRSyntaxError("Finite horizon MDP must have a 'gamme' (discounted factor) field")
             if "horizon" not in modelStruct:
-                raise SyntaxError("A finite horizon MDP must have a horizon")
+                raise SyntaxError("Finite horizon MDP must have a 'horizon' field")
+            gamma = modelStruct["gamma"]
             horizon = modelStruct["horizon"]
+        elif type == "MarkovChain":
+            pass # Do nothing.
         else:
-            raise Exception("Unimplemented yet!!")
+            raise UnsupportedFeatureError(f"Unsupported type '{type}' for JaniR model '{name}'")
+        
+        criterion = None
+        if type != "MarkovChain":
+            if "criterion" not in modelStruct:
+                raise JaniRSyntaxError(f"Model '{name}' which is not 'MarkovChain' type must have a 'criterion' field")
+            criterion = modelStruct["criterion"]
+            if criterion not in ["max", "min"]:
+                raise UnsupportedFeatureError(f"Unsupported criterion '{criterion}' for JaniR model '{name}'\n"
+                                              "Only 'max' and 'min' are supported")
         model = JaniRModel(name, type, criterion, gamma, horizon)
 
-        for action in modelStruct.get("actions", []):
-            if "name" not in action:
-                raise SyntaxError("An action must have a name")
-            model.addAction(action["name"])
-        
+        self._parseActions(model, modelStruct["actions"])
         if "system" not in modelStruct:
-            raise SyntaxError(f"Model '{name}' must have a system structure")
-        self.parseSystem(model, modelStruct["system"])
+            raise JaniSyntaxError(f"Model '{name}' must have a system composition")
+        self._parseSystem(model, modelStruct["system"])
 
-        self.parseConstants(model, modelStruct.get("constants", []))
-        self.parseVariables(model, modelStruct.get("variables", []), ("global", ))
-        self.parseFunctions(model, modelStruct.get("functions", []), ("global", ))
+        self._parseConstants(model, modelStruct.get("constants", []))
+        self._parseVariables(model, modelStruct.get("variables", []), ("global", ))
+        self._parseFunctions(model, modelStruct.get("functions", []), ("global", ))
 
         if "automata" not in modelStruct:
-            raise SyntaxError(f"Model '{name}' must have a automata structure")
-        for automata in modelStruct["automata"]:
-            self.parseAutomata(model, automata)
-
-        model.synchronize()
+            raise JaniSyntaxError(f"Model '{name}' must have an automata composition")
+        automata = modelStruct["automata"]
+        if len(automata) != 1:
+            raise JaniRSyntaxError(f"Model '{name}' supports only single automata")
+        model.addAutomata(self._parseAutomata(model, automata[0]))
         return model
+    
+    @override
+    def _parseSystem(self, model, system):
+        """Parse system composition structure."""
+        automataIndices = dict()
+        if "elements" not in system:
+            raise JaniSyntaxError("System composition must contain at least one automata")
+        if len(system["elements"]) != 1:
+            raise JaniRSyntaxError(f"Model '{model.name}' supports only single automata")
+        
+        elem = system["elements"][0]
+        if "automaton" not in elem:
+            raise JaniSyntaxError("System element must have an 'automaton' field")
+        automataIndices[elem["automaton"]] = 0
+        
+        model.setSystemInformation(automataIndices)
+    
+    @override
+    def _parseEdge(self, model, edge, scope):
+        """Parse automata edge."""
+        _, automata = scope
+        if "location" not in edge:
+            raise JaniSyntaxError(f"Edge in automata '{automata}' must have a 'location' field")
+        src = edge["location"]
+        src = { f"{src}.{automata}" }
 
+        if "action" not in edge:
+            raise JaniRSyntaxError(f"Edge in automata '{automata}' must have a 'action' field")
+        act = edge["action"]
+        if not model.containsAction(act):
+            raise JaniSyntaxError(f"Unknown action '{act}' in automata '{automata}'")
 
+        if "guard" not in edge:
+            guard = Expression("bool", True)
+        else:
+            guard = edge["guard"]
+            if "exp" not in guard:
+                raise JaniSyntaxError(f"Guard in automata '{automata}' must have an 'exp' field")
+            guard = self._parseExpression(model, guard["exp"], scope)
+        
+        if "destinations" not in edge:
+            raise JaniSyntaxError(f"Edge in automata '{automata}' must have a 'destinations' structure")
+        edgeDests = list()
+        for destination in edge["destinations"]:
+            if "location" not in destination:
+                raise JaniSyntaxError("Edge destination in automata '{automata}' must have a 'location' field")
+            dest = destination["location"]
+            dest = { f"{dest}.{automata}" }
+
+            if "probability" not in destination:
+                prob = Expression("real", 1.)
+            else:
+                prob = destination["probability"]
+                if "exp" not in prob:
+                    raise JaniSyntaxError("The 'probability' structure must have a 'exp' field")
+                prob = self._parseExpression(model, prob["exp"], scope)
+
+            if "reward" not in destination:
+                reward = Expression("real", 0.)
+            else:
+                reward = destination["reward"]
+                if "exp" not in reward:
+                    raise JaniRSyntaxError("The 'reward' structure must have a 'exp' field")
+                reward = self._parseExpression(model, reward["exp"], scope)            
+            
+            assgns = dict()
+            for assgn in destination.get("assignments", []):
+                if "ref" not in assgn:
+                    raise JaniSyntaxError("The 'assignment' structure must have a 'ref' field")
+                ref = assgn["ref"]
+                if not model.isGlobalVariable(ref):
+                    ref = f"{ref}.{automata}"
+                if not model.containsVariable(ref):
+                    raise JaniSyntaxError(f"Unknown variable '{ref}' reference in automata '{automata}'")
+
+                if "value" not in assgn:
+                    raise JaniSyntaxError(f"The 'assignment' structure must have a 'value' field")
+                value = self._parseExpression(model, assgn["value"], scope)
+                assgns[ref] = value
+            edgeDests.append(EdgeDestination(dest, prob, assgns, reward))
+        return Edge(src, act, guard, edgeDests)
+    
 if __name__ == "__main__":
     ###########################################################
     # PPDDL instances
@@ -622,11 +732,11 @@ if __name__ == "__main__":
     # 2412 transitions and 0 deadlocks
     # In total, 2412 transitions
     # python3 reader.py  0,44s user 0,02s system 99% cpu 0,470 total
-    # path = "../../benchmarks/prism2jani/consensus.2.v1.jani"
-    # reader = JaniReader(path, modelParams={ "K": 10 })
+    path = "../../benchmarks/prism2jani/consensus.2.v1.jani"
+    reader = JaniReader(path, modelParams={ "K": 10 })
 
-    path = "../../benchmarks/prism2jani/csma.2-2.v1.jani"
-    reader = JaniReader(path, modelParams={})
+    # path = "../../benchmarks/prism2jani/csma.2-2.v1.jani"
+    # reader = JaniReader(path, modelParams={})
 
     # 12828 states
     # 1 actions
@@ -653,9 +763,9 @@ if __name__ == "__main__":
     # path = "../../benchmarks/prism2jani/pacman.v2.jani"
     # reader = JaniReader(path, modelParams={ "MAXSTEPS": 15 })
 
-    reader.build().writeJaniR("out.txt", "all_before_max")
-    model = JaniRReader("out.txt", {}).build()
-    stateSpace, actionSpace, Transitions, Rewards = model.buildTransitionAndReward()
-    mdp = mmdp.TotalRewardMDP(model.criterion, stateSpace, actionSpace, Transitions, Rewards)
-    with open("out_1.txt", "w") as file:
-        print(mdp.ValueIteration(1e-10, 1000), file=file)
+    # reader.build().writeJaniR("out.txt", "all_before_min")
+    # model = JaniRReader("out.txt", {}).build()
+    # stateSpace, actionSpace, Transitions, Rewards = model.buildTransitionAndReward()
+    # mdp = mmdp.TotalRewardMDP(model.criterion, stateSpace, actionSpace, Transitions, Rewards)
+    # with open("out_1.txt", "w") as file:
+    #     print(mdp.ValueIteration(1e-10, 1000), file=file)

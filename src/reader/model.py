@@ -2,27 +2,31 @@ from itertools import product
 from collections import deque
 from copy import deepcopy
 
-import json
+# import json
 import numpy as np
 
-from automata import Automata, Edge, EdgeDestination
-from expression import Expression
-from state import State
+from .automata import Automata, Edge, EdgeDestination
+from .variable import Type
+from .expression import Expression
+from .state import State
+from ..exception import *
 
 import marmote.core as mc
 import marmote.mdp as mmdp
 
-class _BaseModel(object):
-    __slots__ = [
-        "_name", "_type", "_actions", "_constants", "_transientVars", "_nonTransientVars",
-        "_functions", "_automataMapIndex", "_preSyncActionsList", "_nonSyncAutomatas", "_automata"
-    ]
+try:
+    from typing_extensions import override
+except ImportError:
+    pass
 
+class JaniModel(object):
+    """A class represents a JANI (Json Automata Network Interface) model."""
     def __init__(self, name, type):
         self._name = name
         self._type = type
         
-        self._actions = set()
+        self._actions = dict()
+        self._actionCounter = 0
         self._constants = dict()
 
         self._transientVars = dict()
@@ -30,10 +34,12 @@ class _BaseModel(object):
 
         self._functions = dict()
 
-        self._automataMapIndex = None
-        self._preSyncActionsList = None
+        self._automataIndices = None
+        self._preSyncActionss = None
         self._nonSyncAutomatas = None
         self._automata = None
+
+        self._properties = dict()
 
     @property
     def name(self):
@@ -47,7 +53,8 @@ class _BaseModel(object):
         """Add an action to the model."""
         if action in self._actions:
             raise KeyError(f"Action '{action}' already exists in model '{self.name}'")
-        self._actions.add(action)
+        self._actions[action] = self._actionCounter
+        self._actionCounter += 1
 
     def containsAction(self, action):
         """Return True if the model contains action, otherwise return False."""
@@ -65,7 +72,7 @@ class _BaseModel(object):
         return name in self._constants
     
     def getConstantValue(self, name):
-        """Return the associated value of a constant variable, otherwise raise a KeyError."""
+        """Get the associated value of a constant variable."""
         constant = self._constants.get(name)
         if constant is not None:
             return constant.value
@@ -95,16 +102,6 @@ class _BaseModel(object):
         if variable is not None:
             return variable.isGlobal()
         return False
-    
-    def isLocalVariable(self, name):
-        """Return True if the variable name is declared as a local variable."""
-        variable = self._transientVars.get(name)
-        if variable is not None:
-            return not variable.isGlobal()
-        variable = self._nonTransientVars.get(name)
-        if variable is not None:
-            return not variable.isGlobal()
-        return False
 
     def isTransientVariable(self, name):
         """Return True if name is declared as a transient variable."""
@@ -114,18 +111,18 @@ class _BaseModel(object):
         """Return True if the model contains variable name, otherwise return False."""
         return name in self._constants or name in self._transientVars or name in self._nonTransientVars
 
-    def declareFunction(self, name):
-        """Declare the name as a function."""
+    def declareFunction(self, function):
+        """Declare a function in the model."""
+        name = function.name
         if name in self._functions:
             raise KeyError(f"Function '{name}' already exists in model '{self.name}'")
-        self._functions[name] = None
+        self._functions[name] = function
 
-    def addFunction(self, function):
-        """Add a function to the model."""
-        name = function.name
+    def addFunctionBody(self, name, body):
+        """Add a function body to a declared function."""
         if name not in self._functions:
             raise KeyError(f"Undeclared function name '{name}' for model '{self.name}'")
-        self._functions[name] = function
+        self._functions[name].addBody(body)
     
     def containsFunction(self, name):
         """Return True if the model contains function, otherwise return False."""
@@ -137,24 +134,24 @@ class _BaseModel(object):
             raise SyntaxError(f"Unrecognized function '{name}' for model '{self.name}'")
         return self._functions[name]
 
-    def setSystemInformation(self, automataMapIndex, preSysnActionsList):
+    def setSystemInformation(self, automataIndices, preSysnActionss):
         """Add system information to the model."""
-        if self._automataMapIndex is not None and self._preSyncActionsList is not None:
+        if self._automataIndices is not None and self._preSyncActionss is not None:
             raise Exception("System information has already been defined and cannot be redefined")
-        self._automataMapIndex = automataMapIndex
-        self._preSyncActionsList = preSysnActionsList
-        self._nonSyncAutomatas = [None] * len(self._automataMapIndex)
+        self._automataIndices = automataIndices
+        self._preSyncActionss = preSysnActionss
+        self._nonSyncAutomatas = [None] * len(self._automataIndices)
 
     def addAutomata(self, automata):
-        """Add a non-synchronized automata to the model."""
-        if self._automataMapIndex is None:
+        """Add a automata to the model."""
+        if self._automataIndices is None:
             raise Exception("System information not defined")
         name = automata.name
-        if name not in self._automataMapIndex:
+        if name not in self._automataIndices:
             raise KeyError(f"Unrecognized automata '{name}' for model '{self.name}'")
-        idx = self._automataMapIndex[name]
+        idx = self._automataIndices[name]
         self._nonSyncAutomatas[idx] = automata
-    
+
     def getInitStates(self):
         """Return all possible initial states."""
         states = []
@@ -163,11 +160,12 @@ class _BaseModel(object):
         for vars in product(*map(lambda x: x.instantiate(), self._nonTransientVars.values())):
             transientVars = deepcopy(self._transientVars)
             nonTransientVars = { var.name: var for var in vars }
+            varGetter = { var.name: var.value for var in vars }
             for loc in setOfLocation:
                 if loc not in locs:
                     continue
                 for ref, value in locs[loc].items():
-                    transientVars[ref].setValueTo(value.eval(nonTransientVars, self._functions))
+                    transientVars[ref].setValueTo(value.eval(varGetter, self._functions))
             states.append(State(transientVars, nonTransientVars, setOfLocation))
         return states
 
@@ -175,7 +173,9 @@ class _BaseModel(object):
         """Synchronize automata."""
         if self._automata is not None:
             raise Exception("Synchronization is complete")
+        print("Start synchronization")
         self._automata = self._synchronizeAutomata()
+        print("Synchronization success")
         del self._nonSyncAutomatas
     
     def _synchronizeAutomata(self):
@@ -184,7 +184,7 @@ class _BaseModel(object):
         if len(self._nonSyncAutomatas) == 1:
             return self._nonSyncAutomatas[0]
         
-        syncActions = set()
+        syncActions = dict()
         syncEdges = list()
         syncInitLoc = set()
         syncLocs = dict()
@@ -198,15 +198,17 @@ class _BaseModel(object):
             actionMapEdges = dict()
             for edge in automata.edges:
                 action = edge.action
-                if action == "silentAction":
+                if action == "silent-action":
                     syncEdges.append(edge)
                 else:
                     actionMapEdges.setdefault(action, []).append(edge)
             actionMapEdgesList.append(actionMapEdges)
 
         # Synchronization.
-        for result, preSyncActions in self._preSyncActionsList:
-            syncActions.add(result)
+        syncActionCounter = 0
+        for result, preSyncActions in self._preSyncActionss:
+            syncActions[result] = syncActionCounter
+            syncActionCounter += 1
             preSyncEdgesList = []
             for i, preSyncAcition in enumerate(preSyncActions):
                 if preSyncAcition is not None:
@@ -215,6 +217,7 @@ class _BaseModel(object):
             for edgeComb in product(*preSyncEdgesList):
                 syncEdges.append(self._synchronizeEdge(edgeComb, result))
         self._actions = syncActions
+        self._actionCounter = syncActionCounter
         return Automata("Main", syncLocs, syncInitLoc, syncEdges)
     
     def _synchronizeEdge(self, edgeComb, action):
@@ -236,243 +239,430 @@ class _BaseModel(object):
         syncDest = set()
         syncProb = Expression("real", 1.)
         syncAssngs = dict()
-        syncReward = Expression("int", 0)
 
         for edgeDest in edgeDestComb:
             syncDest.update(edgeDest.destination)
             syncProb = Expression.reduceExpression("*", syncProb, edgeDest.probability)
             syncAssngs.update(edgeDest.assignments)
-            syncReward = Expression.reduceExpression("+", syncReward, edgeDest.reward) # TODO
-        return EdgeDestination(syncDest, syncProb, syncAssngs, syncReward)
+        return EdgeDestination(syncDest, syncProb, syncAssngs)
 
-
-class JaniModel(_BaseModel):
-    def __init__(self, name, type):
-        super().__init__(name, type)
-
-        self._properties = dict()
-    
     def addProperty(self, property):
         """Add a property to the model."""
-        # TODO
         name = property.name
+        if name in self._properties:
+            raise KeyError(f"Property '{name}' already exists in model '{self.name}'")
         self._properties[name] = property
-        pass
-    
-    def writeJaniR(self, path, targetProperty):
-        modelStruct = dict()
-        modelStruct["name"] = self.name
 
-        # TODO
-        modelStruct["type"] = "TotalRewardMDP"
-        modelStruct["criterion"] = "max"
-        ####
+    def exploreStateSpace(self, initStates, stateTemplate, terminalStateExpr, rewardExpr, singleActRequirement=False):
+        """Explore all reachable states from initial states.
 
-        modelStruct["constants"] = [
-            constant.toJaniRRepresentation()
-            for constant in self._constants.values()
-        ]
+        Parameters:
+            initStates: List of all possible initial states.
 
-        modelStruct["actions"] = [
-            { "name": action }
-            for action in self._actions
-        ]
+            stateTemplate: State template.
 
-        globalVars = list()
-        localVars = dict()
-        for var in { **self._transientVars, **self._nonTransientVars }.values():
-            if var.isGlobal():
-                globalVars.append(var.toJaniRRepresentation())
-            else:
-                _, automata = var.scope
-                localVars.setdefault(automata, []).append(var.toJaniRRepresentation())
-        modelStruct["variables"] = globalVars
+            terminalStateExpr: Terminal state expression.
 
-        globalFuncs = list()
-        localFuncs = dict()
-        for func in self._functions.values():
-            if func.isGlobal():
-                globalFuncs.append(func.toJaniRRepresentation())
-            else:
-                _, automata = func.scope
-                localFuncs.setdefault(automata, []).append(func.toJaniRRepresentation())
-        modelStruct["functions"] = globalFuncs
+            rewardExpr: Reward expression.
 
-        modelStruct["system"] = {
-            "elements": [
-                { "automaton": automata }
-                for automata in self._automataMapIndex.keys()
-            ],
-            "syncs": [
-                {
-                    "synchronise": syncActions,
-                    "result": result
-                } for result, syncActions in self._preSyncActionsList
-            ]
-        }
+            singleActRequirement: Single action requirement (as in case of MC).
 
-        modelStruct["automata"] = [
-            automata.toJaniRRepresentation()
-            for automata in self._nonSyncAutomatas
-        ]
-        for automata in modelStruct["automata"]:
-            name = automata["name"]
-            if name in localVars:
-                automata["variables"] = localVars[name]
-            if name in localFuncs:
-                automata["functions"] = localFuncs[name]
-
-        # TODO
-        if targetProperty is not None:
-            property = self._properties[targetProperty]
-            reward = property.reward.toJaniRRepresentation()
-            for automata in modelStruct["automata"]:
-                for edges in automata["edges"]:
-                    for edgeDest in edges["destinations"]:
-                        edgeDest["reward"]["exp"] = reward
-        ####
-        
-        with open(path, "w", encoding="utf-8-sig") as file:
-            file.write(json.dumps(modelStruct, indent=4, ensure_ascii=False))
-
-
-class JaniRModel(_BaseModel):
-    def __init__(self, name, type, criterion, gamma, horizon):
-        super().__init__(name, type)
-        self._criterion = criterion
-        self._gamma = gamma
-        self._horizon = horizon
-
-    @property
-    def criterion(self):
-        return self._criterion
-    
-    @property
-    def gamma(self):
-        return self._gamma
-    
-    @property
-    def horizon(self):
-        return self._horizon
-    
-    def _buildStateAndTransition(self):
+        Returns:
+            out:
+            * A state dict which maps a tuple representation (or immutable list representation) to each state.
+            * An absorbing state set.
+            * A transition dict which maps a tuple (probability, reward) to each triplet (s, s', a).
+            * An actions dict which maps an unique index to each action.
+        """
         visitedStates = set()
         transitions = dict()
-        deadlocks = set()
-        maxSilentActionCounter = 0
+        absorbingStates = set()
+        maxSilentActCnt = 0
 
-        lowMemReprMap = dict()
+        stateToTupReprs = dict()
         queue = deque()
-        initStates = self.getInitStates()
         for initState in initStates:
-            lowMemReprMap[initState] = initState.getLowMemRepr()
+            stateToTupReprs[initState] = initState.getTupRepr(stateTemplate)
             queue.append(initState)
         
         edges = self._automata.edges
         locs = self._automata.locations
         funcGetter = self._functions
         while queue:
-            state = queue.popleft()
-            if state not in visitedStates:
-                stateLowMemRepr = state.getLowMemRepr()
-                visitedStates.add(state)
+            s = queue.pop()
+            if s not in visitedStates:
+                sTupRepr = s.getTupRepr(stateTemplate)
+                visitedStates.add(s)
 
+                if terminalStateExpr.eval(s):
+                    absorbingStates.add(s)
+                    continue
 
                 print(len(visitedStates), end="\r")
 
                 deadlock = True
-                silentActionCounter = 0
+                silentActCnt = 0
                 for edge in edges:
-                    if not edge.isSatisfied(state, funcGetter):
+                    if not edge.isSatisfied(s.setOfLocation, s, funcGetter):
                         continue
 
                     deadlock = False
-                    source = edge.source
-                    action = edge.action
-                    if action == "silentAction":
-                        action = f"{action}_{silentActionCounter}"
-                        silentActionCounter += 1
-                    for edgeDestination in edge.edgeDestinations:
-                        nextState = state.clone(source,
-                                                edgeDestination.destination,
-                                                edgeDestination.assignments,
-                                                locs,
-                                                funcGetter)
-                        probability = edgeDestination.probability.eval(varGetter = state,
-                                                                       funcGetter = funcGetter)
-                        reward = edgeDestination.reward.eval(varGetter = nextState,
-                                                             funcGetter = funcGetter)
-                        if probability <= 0.:
+                    src = edge.source
+                    act = edge.action
+                    if singleActRequirement:
+                        act = "act"
+                    elif act == "silent-action":
+                        act = f"{act}_{silentActCnt}"
+                        silentActCnt += 1
+                    for edgeDest in edge.edgeDestinations:
+                        sPrime = s.clone(src,
+                                         edgeDest.destination,
+                                         edgeDest.assignments,
+                                         locs,
+                                         funcGetter)
+                        prob = edgeDest.probability.eval(s, funcGetter)
+                        reward = rewardExpr.eval(sPrime)
+
+                        if prob <= 0.:
                             continue
 
-                        nextStateLowMemRepr = lowMemReprMap.get(nextState)
-                        if nextStateLowMemRepr is None:
-                            lowMemReprMap[nextState] = nextState.getLowMemRepr()
-                            nextStateLowMemRepr = lowMemReprMap[nextState]
+                        sPrimeTupRepr = stateToTupReprs.get(sPrime)
 
-                        transition = (stateLowMemRepr, nextStateLowMemRepr, action)
-                        transitions[transition] = transitions.get(transition,
-                                                                  np.array([0., 0.])) + [probability, reward]
-                        if nextState not in visitedStates:
-                            queue.append(nextState)
+                        if sPrimeTupRepr is None:
+                            stateToTupReprs[sPrime] = sPrimeTupRepr = sPrime.getTupRepr(stateTemplate)
+                        key = (sTupRepr, sPrimeTupRepr, act)
+                        transitions[key] = transitions.get(key, np.array([0., 0.])) + [prob, reward]
+                        if sPrime not in visitedStates:
+                            queue.append(sPrime)
                         else:
-                            del nextState
+                            del sPrime
                 if deadlock:
-                    # deadlocks[(stateLowMemRepr, stateLowMemRepr, "deadlock")] = np.array([1., 0.])
-                    deadlocks.add(stateLowMemRepr)
-                maxSilentActionCounter = max(maxSilentActionCounter, silentActionCounter)
+                    absorbingStates.add(s)
+                maxSilentActCnt = max(maxSilentActCnt, silentActCnt)
             else:
-                del state
-        actions = { f"silentAction_{i}" for i in range(maxSilentActionCounter) }
-        actions.update(self._actions)
+                del s
+        if singleActRequirement:
+            actions = { "act": 0 }
+        else:
+            actions = deepcopy(self._actions)
+            actions.update({ f"silent-action_{i}": i + self._actionCounter for i in range(maxSilentActCnt) })
+        return stateToTupReprs, absorbingStates, transitions, actions
+        
+    def _getStateVarInformation(self):
+        """"""
+        nonTransientVars = self._nonTransientVars.values()
+        locations = self._automata.locations
+        # Build a state template, which gives a fixed order to state variables (non-transient variables and locations)
+        # and facilitates conversion from state to matrix index.
+        stateTemplate = { var.name: idx for idx, var in enumerate(nonTransientVars) }
 
-        return initStates, set(lowMemReprMap.values()), transitions, deadlocks, actions
+        # Build 2 dictionaries which associates each state variables with its type and initial value.
+        # These 2 information are useful when rewriting the model in a JaniR file.
+        stateVarTypes = { var.name: var.type for var in nonTransientVars }
+        stateVarInitValues = { var.name: var.initValue for var in nonTransientVars }
 
-    def _buildTransitionAndRewardMatrix(self, states, transitions, deadlocks, actions):
-        transitionsPrime = {
+        # If set of locations is greater than 1 (as in case of synchronization), then we add the location
+        # as a state variable. Otherwise, it's unnecessary since it's always true.
+        if len(locations) > 1:
+            dev = len(stateTemplate)
+            stateTemplate.update({ loc: idx + dev for idx, loc in enumerate(locations) })
+            # Add locations as binary variables
+            stateVarTypes.update({ loc: Type("bool") for loc in locations })
+            initLoc = self._automata.initLocation
+            stateVarInitValues.update({ loc: loc in initLoc for loc in locations })
+        return stateTemplate, stateVarTypes, stateVarInitValues
+
+    def getMDPData(self, name):
+        """Get all required and useful data to build a Marmote MDP."""
+        if self._type != "mdp":
+            raise Exception(f"Inconsistent model type '{self._type}'")
+
+        if name not in self._properties:
+            raise KeyError(f"Unknown property '{name}' for model '{self._name}'")
+        prop = self._properties[name]
+        criterion = prop.criterion
+
+        initStates = self.getInitStates()
+        print(f"{len(initStates)} initial states.")
+
+        stateTemplate, stateVarTypes, stateVarInitValues = self._getStateVarInformation()
+
+        # Explore all reachable states from initial states.
+        stateToTupReprs, absorbingStates, transitons, actions = self.exploreStateSpace(initStates,
+                                                                                       stateTemplate,
+                                                                                       prop.terminalStateExpression,
+                                                                                       prop.rewardExpression)
+        print(f"{len(stateToTupReprs)} states, "
+              f"{len(actions)} actions, "
+              f"{len(transitons) + len(absorbingStates)} transitions")
+        
+        # Build and fill 'transitionDict', which is an intermediary structure used to facilitate access
+        # to transition probabilities
+        transitionDict = {
             action: {
-                state: dict() for state in states
+                sTupRepr: dict() for sTupRepr in stateToTupReprs.values()
             } for action in actions
         }
-        for (state, statePrime, action), data in transitions.items():
-            transitionsPrime[action][state][statePrime] = data
+        for (sTupRepr, sPrimeTupRepr, action), data in transitons.items():
+            prob, reward = data
+            transitionDict[action][sTupRepr][sPrimeTupRepr] = np.array([prob, reward])
 
-        stateMapIndex = { state: i for i, state in enumerate(states) }
-        actionMapIndex  = { action: i for i, action in enumerate(actions) }
+        MDPData = {
+            "name": self._name,
+            "type": self._type,
+            "resolution-model": prop.resolutionModel,
+            "criterion": criterion,
+            "states": set(stateToTupReprs.values()),
+            "initial-states": [ stateToTupReprs[s] for s in initStates ],
+            "absorbing-states": { stateToTupReprs[s] for s in absorbingStates },
+            "actions": actions,
+            "transition-dict": transitionDict,
+            "state-template": stateTemplate,
+            "state-variable-types": stateVarTypes,
+            "state-variable-initial-values": stateVarInitValues
 
-        penality = float("-inf") if self.criterion == "max" else float("inf")
+        }
+        return MDPData
 
-        n, m = len(states), len(actions)
-        stateSpace = mc.MarmoteInterval(0, n - 1)
-        actionSpace = mc.MarmoteInterval(0, m - 1)
+    def getMCData(self):
+        """Get all required and useful data to build a Marmote MC."""
+        if self._type != "dtmc":
+            raise Exception(f"Inconsistent model type '{self._type}'")
 
-        Transitions = [ mc.SparseMatrix(n) for _ in range(m) ]
-        Rewards = [ mc.SparseMatrix(n) for _ in range(m) ]
-        for action in actions:
-            actionIndex = actionMapIndex[action]
-            for state in states:
-                stateIndex = stateMapIndex[state]
-                items = transitionsPrime[action][state].items()
-                if items:
-                    for statePrime, data in items:
-                        statePrimeIndex = stateMapIndex[statePrime]
+        initStates = self.getInitStates()
+        print(f"{len(initStates)} initial states.")
 
-                        prob, rew = data
+        stateTemplate, stateVarTypes, stateVarInitValues = self._getStateVarInformation()
 
-                        Transitions[actionIndex].addEntry(stateIndex, statePrimeIndex, prob)
-                        Rewards[actionIndex].addEntry(stateIndex, statePrimeIndex, rew)
-                else:
-                    Transitions[actionIndex].addEntry(stateIndex, stateIndex, 1.)
-                    if state not in deadlocks:
-                        Rewards[actionIndex].addEntry(stateIndex, stateIndex, penality)
-        return stateSpace, actionSpace, Transitions, Rewards
+        # Explore all reachable states from initial states.
+        stateToTupReprs, absorbingStates, transitons, actions = self.exploreStateSpace(initStates,
+                                                                                       stateTemplate,
+                                                                                       Expression("bool", False),
+                                                                                       Expression("int", 0),
+                                                                                       singleActRequirement=True)
+        assert len(actions) == 1
+        print(f"{len(stateToTupReprs)} states, "
+              f"{len(actions)} actions, "
+              f"{len(transitons) + len(absorbingStates)} transitions")
+        
+        # Build and fill 'transitionDict', which is an intermediary structure used to facilitate access
+        # to transition probabilities
+        transitionDict = {
+            sTupRepr: dict() for sTupRepr in stateToTupReprs.values()
+        }
+        for (sTupRepr, sPrimeTupRepr, _), data in transitons.items():
+            prob, _ = data
+            transitionDict[sTupRepr][sPrimeTupRepr] = prob
 
-    def buildTransitionAndReward(self):
-        initStates, states, transitions, deadlocks, actions = self._buildStateAndTransition()
-        print(f"{len(states)} states")
-        print(f"{len(actions)} actions")
-        print(f"{len(transitions)} transitions and {len(deadlocks)} deadlocks")
-        print(f"In total, {len(transitions) + len(deadlocks)} transitions")
-        stateMapIndex = { state: i for i, state in enumerate(states) }
-        print([stateMapIndex[s.getLowMemRepr()] for s in initStates])
-        return self._buildTransitionAndRewardMatrix(states, transitions, deadlocks, actions)
+        MCData = {
+            "name": self._name,
+            "type": self._type,
+            "resolution-model": "MarkovChain",
+            "states": set(stateToTupReprs.values()),
+            "initial-states": [ stateToTupReprs[s] for s in initStates ],
+            "absorbing-states": { stateToTupReprs[s] for s in absorbingStates },
+            "actions": actions,
+            "transition-dict": transitionDict,
+            "state-template": stateTemplate,
+            "state-variable-types": stateVarTypes,
+            "state-variable-initial-values": stateVarInitValues
+
+        }
+        return MCData
+
+
+class JaniRModel(JaniModel):
+    def __init__(self, name, type, criterion, gamma=None, horizon=None):
+        super().__init__(name, type)
+        self._criterion = criterion
+        self._gamma = gamma
+        self._horizon = horizon
+
+    @override
+    def addAutomata(self, automata):
+        """Add a automata to the model."""
+        if self._automataIndices is None:
+            raise Exception("System information not defined")
+        name = automata.name
+        if name not in self._automataIndices:
+            raise KeyError(f"Unknown automata '{name}' for model '{self.name}'")
+        self._automata = automata
+
+    @override
+    def setSystemInformation(self, automataIndices):
+        """Add system information to the model."""
+        if self._automataIndices is not None and self._preSyncActionss is not None:
+            raise Exception("System information has already been defined and cannot be redefined")
+        self._automataIndices = automataIndices
+    
+    @override
+    def synchronize(self):
+        raise UnsupportedFeatureError(f"Synchronization does not support by JaniR model '{self._name}'")
+
+    @override
+    def exploreStateSpace(self, initStates, stateTemplate, singleActRequirement=False):
+        """Explore all reachable states from initial states.
+
+        Parameters:
+            initStates: List of all possible initial states.
+
+            stateTemplate: State template.
+
+            singleActRequirement: Single action requirement (as in case of MC).
+
+        Returns:
+            out:
+            * A state dict which maps a tuple representation (or immutable list representation) to each state.
+            * An absorbing state set.
+            * A transition dict which maps a tuple (probability, reward) to each triplet (s, s', a).
+            * An actions dict which maps an unique index to each action.
+        """
+        visitedStates = set()
+        transitions = dict()
+        absorbingStates = set()
+
+        stateToTupReprs = dict()
+        queue = deque()
+        for initState in initStates:
+            stateToTupReprs[initState] = initState.getTupRepr(stateTemplate)
+            queue.append(initState)
+        
+        edges = self._automata.edges
+        locs = self._automata.locations
+        funcGetter = self._functions
+        while queue:
+            s = queue.popleft()
+            if s not in visitedStates:
+                sTupRepr = s.getTupRepr(stateTemplate)
+                visitedStates.add(s)
+
+                print(len(visitedStates), end="\r")
+
+                deadlock = True
+                for edge in edges:
+                    if not edge.isSatisfied(s.setOfLocation, s, funcGetter):
+                        continue
+        
+                    deadlock = False
+                    src = edge.source
+                    act = edge.action
+                    if singleActRequirement:
+                        act = "act"
+                    for edgeDest in edge.edgeDestinations:
+                        sPrime = s.clone(src,
+                                         edgeDest.destination,
+                                         edgeDest.assignments,
+                                         locs,
+                                         funcGetter)
+                        prob = edgeDest.probability.eval(s, funcGetter)
+                        reward = edgeDest.reward.eval(sPrime, funcGetter)
+
+                        if prob <= 0.:
+                            continue
+
+                        sPrimeTupRepr = stateToTupReprs.get(sPrime)
+                        if sPrimeTupRepr is None:
+                            stateToTupReprs[sPrime] = sPrimeTupRepr = sPrime.getTupRepr(stateTemplate)
+                        
+                        key = (sTupRepr, sPrimeTupRepr, act)
+                        transitions[key] = transitions.get(key, np.array([0., 0.])) + [prob, reward]
+                        if sPrime not in visitedStates:
+                            queue.append(sPrime)
+                        else:
+                            del sPrime
+                if deadlock:
+                    absorbingStates.add(s)
+            else:
+                del s
+        actions = { "act": 0 } if singleActRequirement else deepcopy(self._actions)
+
+        return stateToTupReprs, absorbingStates, transitions, actions
+    
+    @override
+    def getMDPData(self):
+        """Get all required and useful data to build a Marmote MDP."""
+        if self._type not in ["DiscountedMDP", "AverageMDP", "TotalRewardMDP", "FiniteHorizonMDP"]:
+            raise Exception(f"Inconsistent model type '{self._type}'")
+        
+        initStates = self.getInitStates()
+        print(f"{len(initStates)} initial states.")
+
+        stateTemplate, stateVarTypes, stateVarInitValues = self._getStateVarInformation()
+
+        # Explore all reachable states from initial states.
+        stateToTupReprs, absorbingStates, transitons, actions = self.exploreStateSpace(initStates,
+                                                                                       stateTemplate)
+        print(f"{len(stateToTupReprs)} states, "
+              f"{len(actions)} actions, "
+              f"{len(transitons) + len(absorbingStates)} transitions")
+        
+        # Build and fill 'transitionDict', which is an intermediary structure used to facilitate access
+        # to transition probabilities
+        transitionDict = {
+            action: {
+                sTupRepr: dict() for sTupRepr in stateToTupReprs.values()
+            } for action in actions
+        }
+        for (sTupRepr, sPrimeTupRepr, action), data in transitons.items():
+            prob, reward = data
+            transitionDict[action][sTupRepr][sPrimeTupRepr] = np.array([prob, reward])
+
+        MDPData = {
+            "name": self._name,
+            "type": self._type,
+            "criterion": self._criterion,
+            "states": set(stateToTupReprs.values()),
+            "initial-states": [ stateToTupReprs[s] for s in initStates ],
+            "absorbing-states": { stateToTupReprs[s] for s in absorbingStates },
+            "actions": actions,
+            "transition-dict": transitionDict,
+            "state-template": stateTemplate,
+            "state-variable-types": stateVarTypes,
+            "state-variable-initial-values": stateVarInitValues,
+            "gamma": self._gamma,
+            "horizon": self._horizon
+        }
+        return MDPData
+    
+    @override
+    def getMCData(self):
+        """Get all required and useful data to build a Marmote MC."""
+        if self._type != "MarkovChain":
+            raise Exception(f"Inconsistent model type '{self._type}'")
+        
+        initStates = self.getInitStates()
+        print(f"{len(initStates)} initial states.")
+
+        stateTemplate, stateVarTypes, stateVarInitValues = self._getStateVarInformation()
+
+        # Explore all reachable states from initial states.
+        stateToTupReprs, absorbingStates, transitons, actions = self.exploreStateSpace(initStates,
+                                                                                       stateTemplate)
+        assert len(actions) == 1
+        print(f"{len(stateToTupReprs)} states, "
+              f"{len(actions)} actions, "
+              f"{len(transitons) + len(absorbingStates)} transitions")
+        
+        # Build and fill 'transitionDict', which is an intermediary structure used to facilitate access
+        # to transition probabilities
+        transitionDict = {
+            sTupRepr: dict() for sTupRepr in stateToTupReprs.values()
+        }
+        for (sTupRepr, sPrimeTupRepr, _), data in transitons.items():
+            prob, _ = data
+            transitionDict[sTupRepr][sPrimeTupRepr] = prob
+
+        MCData = {
+            "name": self._name,
+            "type": self._type,
+            "states": set(stateToTupReprs.values()),
+            "initial-states": [ stateToTupReprs[s] for s in initStates ],
+            "absorbing-states": { stateToTupReprs[s] for s in absorbingStates },
+            "actions": actions,
+            "transition-dict": transitionDict,
+            "state-template": stateTemplate,
+            "state-variable-types": stateVarTypes,
+            "state-variable-initial-values": stateVarInitValues,
+        }
+        return MCData
+
