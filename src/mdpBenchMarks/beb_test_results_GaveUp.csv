@@ -1,4 +1,4 @@
-file,params,prop,type,n,a,time_read,time_VI,opt_VI,time_VIGS,opt_VIGS,time_PI,opt_PI,time_PTGS,opt_PTGS,time_RVI,opt_RVI,repeat,error
+file,params,prop,type,n,a,time_read,time_VI,opt_VI,time_VIGS,opt_VIGS,time_PI,opt_PI,time_PIGS,opt_PIGS,time_RVI,opt_RVI,repeat,error
 beb.3-4.v1.jani,{'N': 1},GaveUp,TotalRewardMDP,99,6,0.04170100000919774,0.00012,0.625,7e-05,0.625,9e-05,0.625,3e-05,0.625,,,1,
 beb.3-4.v1.jani,{'N': 1},GaveUp,TotalRewardMDP,99,6,0.04170100000919774,0.00012,0.625,6e-05,0.625,3e-05,0.625,2e-05,0.625,,,2,
 beb.3-4.v1.jani,{'N': 1},GaveUp,TotalRewardMDP,99,6,0.04170100000919774,0.00011,0.625,6e-05,0.625,3e-05,0.625,2e-05,0.625,,,3,

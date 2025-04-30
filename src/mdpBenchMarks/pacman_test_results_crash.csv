@@ -1,4 +1,4 @@
-file,params,prop,type,n,a,time_read,time_VI,opt_VI,time_VIGS,opt_VIGS,time_PI,opt_PI,time_PTGS,opt_PTGS,time_RVI,opt_RVI,repeat,error
+file,params,prop,type,n,a,time_read,time_VI,opt_VI,time_VIGS,opt_VIGS,time_PI,opt_PI,time_PIGS,opt_PIGS,time_RVI,opt_RVI,repeat,error
 pacman.v2.jani,{'MAXSTEPS': 5},crash,TotalRewardMDP,235,10,7.272029028987163,0.00044,0.5511,0.00018,0.5511,8e-05,0.5511,8e-05,0.5511,,,1,
 pacman.v2.jani,{'MAXSTEPS': 5},crash,TotalRewardMDP,235,10,7.272029028987163,0.00024,0.5511,0.00017,0.5511,8e-05,0.5511,7e-05,0.5511,,,2,
 pacman.v2.jani,{'MAXSTEPS': 5},crash,TotalRewardMDP,235,10,7.272029028987163,0.00026,0.5511,0.00017,0.5511,8e-05,0.5511,8e-05,0.5511,,,3,

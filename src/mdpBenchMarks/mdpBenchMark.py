@@ -60,10 +60,10 @@ def run(file_name, param, properties, rep=30):
                         opt5 = None
 
                     time_PI, opt3 = function(mdp.PolicyIterationModified, 1e-10, 2000, 0.001, 2000)
-                    time_PTGS, opt4 = function(mdp.PolicyIterationModifiedGS, 1e-10, 2000, 0.001, 2000)
+                    time_PIGS, opt4 = function(mdp.PolicyIterationModifiedGS, 1e-10, 2000, 0.001, 2000)
                     error = ""
                 except Exception as algo_error:
-                    time_VI = time_VIGS = time_PI = time_PTGS = time_RVI = None
+                    time_VI = time_VIGS = time_PI = time_PIGS = time_RVI = None
                     opt1 = opt2 = opt3 = opt4 = opt5 = None
                     error = str(algo_error)
 
@@ -81,8 +81,8 @@ def run(file_name, param, properties, rep=30):
                     "opt_VIGS": opt2.getValueIndex(initIdx) if opt2 else None,
                     "time_PI": time_PI,
                     "opt_PI": opt3.getValueIndex(initIdx) if opt3 else None,
-                    "time_PTGS": time_PTGS,
-                    "opt_PTGS": opt4.getValueIndex(initIdx) if opt4 else None,
+                    "time_PIGS": time_PIGS,
+                    "opt_PIGS": opt4.getValueIndex(initIdx) if opt4 else None,
                     "time_RVI": time_RVI,
                     "opt_RVI": opt5.getValueIndex(initIdx) if opt5 else None,
                     "repeat": i + 1,
@@ -106,8 +106,8 @@ def run(file_name, param, properties, rep=30):
             "opt_VIGS": None,
             "time_PI": None,
             "opt_PI": None,
-            "time_PTGS": None,
-            "opt_PTGS": None,
+            "time_PIGS": None,
+            "opt_PIGS": None,
             "time_RVI": None,
             "opt_RVI": None,
             "repeat": 0,
@@ -131,7 +131,7 @@ if __name__ == '__main__':
             f.write(",".join([
                 "file", "params", "prop", "type", "n", "a", "time_read",
                 "time_VI", "opt_VI", "time_VIGS", "opt_VIGS", "time_PI", "opt_PI",
-                "time_PTGS", "opt_PTGS","time_RVI","opt_RVI",
+                "time_PIGS", "opt_PIGS","time_RVI","opt_RVI",
                 "repeat", "error"
             ]) + "\n")
 
