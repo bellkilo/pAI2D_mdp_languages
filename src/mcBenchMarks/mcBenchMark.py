@@ -8,12 +8,13 @@ import marmote.core as marmotecore
 
 
 
+# export PYTHONPATH=/mnt/c/Users/PC/Music/pAI2D_mdp_languages/
+
 roo_path = "../../benchmarks/mcJani/"
 
 files = {
-    "brp.jani" : [{"N": N, "MAX": max_val}
-                 for N in [2**i for i in range(4, 11)]  # 2⁴=16 到 2¹⁰=1024
-                 for max_val in range(2, 21)]
+    "brp.jani" : [{"N": N, "MAX": 20}
+                 for N in range(1, 1001, 10)]
     # "brp.jani": [{"N" : 16, "MAX": 2},
     #              {"N" : 16, "MAX": 3},
     #              {"N" : 16, "MAX": 4},
@@ -72,16 +73,16 @@ files = {
 }
 
 
-def avg_time(fn, *args, rep=5, **kwargs):
-    total = 0.0
-    for _ in range(rep):
-        t0 = time.perf_counter()
-        fn(*args, **kwargs)
-        total += time.perf_counter() - t0
-    return round(total / rep, 4)
+def function(fn, *args, **kwargs):
+    t0 = time.perf_counter()
+    fn(*args, **kwargs)
+    total = time.perf_counter() - t0
+    return round(total, 5)
 
-def run(file_name, param):
+def run(file_name, param, rep = 30):
     path = os.path.join(roo_path, file_name)
+    results = []
+
     try:
         t_read_start = time.perf_counter()
         model = rd.JaniReader(path, modelParams=param).build()
@@ -92,30 +93,31 @@ def run(file_name, param):
         dm = DataMarmote(mcData)
         mc = dm.createMarmoteObject()
         t_read_end = time.perf_counter()
-        time_read = round(t_read_end - t_read_start, 4)
+        time_read = round(t_read_end - t_read_start, 5)
 
 
+        for i in range(rep):
+            time_SD   = function(mc.StationaryDistribution)
+            time_RLGL = function(
+                mc.StationaryDistributionRLGL,
+                1000, 1e-10,
+                marmotecore.UniformDiscreteDistribution(0, n - 1),
+                False
+            )
 
-        time_SD   = avg_time(mc.StationaryDistribution)
-
-        time_RLGL = avg_time(
-            mc.StationaryDistributionRLGL,
-            1000, 1e-10,
-            marmotecore.UniformDiscreteDistribution(0, n - 1),
-            False
-        )
-
-        result = {
-            "file": file_name,
-            "params": str(param),
-            "n": n,
-            "m": m,
-            "m/n": round(m/n, 4) if n else None,
-            "time_read": time_read,
-            "time_SD": time_SD,
-            "time_RLGL": time_RLGL,
-            "error": ""
-        }
+            result = {
+                "file": file_name,
+                "params": str(param),
+                "n": n,
+                "m": m,
+                "m/n": round(m/n, 4) if n else None,
+                "time_read": time_read,
+                "time_SD": time_SD,
+                "time_RLGL": time_RLGL,
+                "error": "",
+                "repeat" : i+1
+            }
+            results.append(result)
     except Exception as e:
         print(f"error: {str(e)}")
         result = {
@@ -126,14 +128,17 @@ def run(file_name, param):
             "m/n": None,
             "time_SD": None,
             "time_RLGL": None,
-            "error": str(e)
+            "error": str(e),
+            "repeat": None
         }
+        results.append(result)
 
-    return result
+    return results
 
 
 if __name__ == '__main__':
-    output_file = "../../../../PycharmProjects/CR_and_CNN_algorithm/src/brp_test_results.csv"
+    # output_file = "../../src/mcBenchMarks/brp_test_results.csv"
+    output_file = "brp_test_results.csv"
     completed = set()
     if os.path.exists(output_file):
         df_done = pd.read_csv(output_file)
@@ -142,7 +147,7 @@ if __name__ == '__main__':
 
     if not os.path.exists(output_file):
         with open(output_file, "w") as f:
-            f.write("file,params,n,m,m/n,time_read,time_SD,time_RLGL,error\n")
+            f.write("file,params,n,m,m/n,time_read,time_SD,time_RLGL,error,repeat\n")
 
     for file_name, param_list in files.items():
         for param in param_list:
@@ -151,8 +156,8 @@ if __name__ == '__main__':
                 print(f"skip: {file_name}, param: {param}")
                 continue
 
-            result = run(file_name, param)
-            df = pd.DataFrame([result])
+            results = run(file_name, param)
+            df = pd.DataFrame(results)
             df.to_csv(output_file, mode="a", header=False, index=False)
             print(f"finished: {file_name} param: {param}")
 

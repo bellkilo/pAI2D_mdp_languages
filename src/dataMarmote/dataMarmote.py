@@ -2,8 +2,8 @@ import json
 import os
 from typing import Optional, Dict, List, Set, Union
 
-from ..reader.variable import Type
-from ..exception import *
+from src.reader.variable import Type
+from src.exception import *
 
 import marmote.core as mc
 import marmote.markovchain as mmc
@@ -29,8 +29,10 @@ class DataMarmote:
 
         self._criterion = data.get("criterion")
         self._resolutionModel = data.get("resolution-model")
-        self._gamma = data.get("gamma")
-        self._horizon = data.get("horizon")
+        # self._gamma = data.get("gamma")
+        # self._horizon = data.get("horizon")
+        self._gamma = 0.9
+        self._horizon = 1
         self._initStates = data.get("initial-states")
         self._stateVarInitValues = data.get("state-variable-initial-values")
 
@@ -136,7 +138,7 @@ class DataMarmote:
         }
         return DataMarmote(MDPData)
 
-    def createMDPObject(self):
+    def createMDPObject(self, discount, horizonFini):
         """Create an associated Marmote MDP."""
         if not self._isInstantiate:
             n, m = len(self._states), len(self._actions)
@@ -156,6 +158,8 @@ class DataMarmote:
 
                 for sTupRepr, sPrimeMap in transtionDict[act].items():
                     sIdx = stateTupReprToIdx[sTupRepr]
+                    row_sum = 0.0
+
                     if sPrimeMap:
                         for sPrimeTupRepr, data in sPrimeMap.items():
                             prob, reward = data
@@ -163,6 +167,16 @@ class DataMarmote:
                             sPrimeIdx = stateTupReprToIdx[sPrimeTupRepr]
                             transitionMatrix.addEntry(sIdx, sPrimeIdx, prob)
                             rewardMatrix.addEntry(sIdx, sPrimeIdx, reward)
+                            row_sum += prob
+
+                        if abs(row_sum - 1.0) > 1e-8:
+                            if row_sum < 1.0:
+                                missing_prob = 1.0 - row_sum
+                                transitionMatrix.addEntry(sIdx, sIdx, missing_prob)
+                                rewardMatrix.addEntry(sIdx, sIdx, 0.0)
+                            else:
+                                raise Exception(
+                                    f"Invalid transition probabilities for state {sTupRepr}, action {act}: sum = {row_sum}")
                     else:
                         transitionMatrix.addEntry(sIdx, sIdx, 1.)
                         if sTupRepr not in absorbingStates:
@@ -176,6 +190,10 @@ class DataMarmote:
             self._isInstantiate = True
 
         MDPType = self._resolutionModel if self._type == "mdp" else self._type
+        if discount:
+            MDPType = "DiscountedMDP"
+        if horizonFini:
+            MDPType = "FiniteHorizonMDP"
         if MDPType == "DiscountedMDP":
             return mmdp.DiscountedMDP(self._criterion,
                                       self._stateSpace,
@@ -203,15 +221,37 @@ class DataMarmote:
                                          self._rewardMatrices,
                                          self._horizon,
                                          self._gamma)
-    
-    def createMCObject(self):
-        pass
 
-    def createMarmoteObject(self):
+
+    def createMCObject(self):
+        transitionDict = self._transitionDict
+        n = len(self._states)
+        stateTupReprToIdx = self._stateTupReprToIdx
+        transitionMatrix = mc.SparseMatrix(n)
+
+        for sTupRepr, sPrimeMap in transitionDict.items():
+            sIdx = stateTupReprToIdx[sTupRepr]
+            row_sum = 0
+            for sPrimeTupRepr, data in sPrimeMap.items():
+                sPrimeIdx = stateTupReprToIdx[sPrimeTupRepr]
+                transitionMatrix.addEntry(sIdx, sPrimeIdx, data)
+                row_sum += data
+            if abs(row_sum - 1.0) > 1e-8:
+                if row_sum < 1.0:
+                    missing_prob = 1.0 - row_sum
+                    transitionMatrix.addEntry(sIdx, sIdx, missing_prob)
+                else:
+                    raise Exception(f"Invalid transition probabilities for state {sTupRepr}: sum = {row_sum}")
+
+        transitionMatrix.set_type(mc.DISCRETE)
+        self._transitionMatrices = transitionMatrix
+        return mmc.MarkovChain(transitionMatrix)
+
+    def createMarmoteObject(self, discount=False, horizonFini=False):
         """Create an associated Marmote instance."""
         if self._type in ["dtmc", "MarkovChain"]:
             return self.createMCObject()
-        return self.createMDPObject()
+        return self.createMDPObject(discount, horizonFini)
     
     #     else:
     #         P = SparseMatrix(stateSpace)

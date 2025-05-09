@@ -465,8 +465,8 @@ class JaniModel(object):
             "transition-dict": transitionDict,
             "state-template": stateTemplate,
             "state-variable-types": stateVarTypes,
-            "state-variable-initial-values": stateVarInitValues
-
+            "state-variable-initial-values": stateVarInitValues,
+            "number-transitions": len(transitons) + len(absorbingStates)
         }
         return MCData
 

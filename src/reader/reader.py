@@ -98,7 +98,7 @@ class JaniReader(object):
         for autamata in modelStruct["automata"]:
             model.addAutomata(self._parseAutomata(model, autamata))
         
-        if "properties" not in modelStruct:
+        if "properties" not in modelStruct or type == "dtmc":
             pass
         else:
             self._parseProperties(model, modelStruct["properties"])
@@ -721,7 +721,7 @@ if __name__ == "__main__":
     # In total, 3851520 transitions
     # python3 reader.py  1149,72s user 3,50s system 99% cpu 19:17,56 total
 
-    # path = "../../benchmarks/ppddl2jani/zenotravel.4-2-2.v1.jani"
+    # path = "../../benchmarks/ppddl2jani/zenotravel.4-2-2.v1man.jani"
     # reader = JaniReader(path, modelParams={})
 
     ###########################################################
