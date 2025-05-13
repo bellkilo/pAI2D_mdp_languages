@@ -19,58 +19,13 @@ import marmote.core as marmotecore
 
 # properties = ["steps_max"]
 
-# roo_path = "../../benchmarks/prism2jani/"
-#
-# files = {
-#    # "pacman.v2.jani": [{"MAXSTEPS": N} for N in range(5,46)],
-#     "consensus.2.v1.jani": [{"K": N} for N in range(8, 417, 8)]
-# }
-#
-# properties = {"pacman.v2.jani":["crash"], "consensus.2.v1.jani": ["c2", "steps_max", "discunt", "horizon"]}
-
-roo_path = "./files/"
-
-# files = {
-#     "beb.3-4.v1.jani" : [{"N":3}],
-#     "blocksworld.5.v1.jani" : [{}],
-#     "cdrive.6.v1.jani" : [{}],
-#     "cdrive.10.v1.jani" : [{}],
-#     "csma.2-2.v1.jani" : [{}],
-#     "csma.2-4.v1.jani" : [{}],
-#     "elevators.a-3-3.v1.jani" : [{}],
-#     "elevators.a-11-9.v1.jani" : [{}],
-#     "elevators.b-3-3.v1.jani" : [{}],
-#     "philosophers-mdp.3.v1.jani" : [{}],
-#     "tireworld.17.v1.jani" : [{}],
-# }
-#
-# properties = {
-#     "beb.3-4.v1.jani" : ["LineSeized"],
-#     "blocksworld.5.v1.jani" : ["goal"],
-#     "cdrive.6.v1.jani" : ["goal"],
-#     "cdrive.10.v1.jani" : ["goal"],
-#     "csma.2-2.v1.jani" : ["all_before_max", "time_max"],
-#     "csma.2-4.v1.jani" : ["all_before_max", "time_max"],
-#     "elevators.a-3-3.v1.jani" : ["goal"],
-#     "elevators.a-11-9.v1.jani" : ["goal"],
-#     "elevators.b-3-3.v1.jani" : ["goal"],
-#     "philosophers-mdp.3.v1.jani" : ["eat"],
-#     "tireworld.17.v1.jani" : ["goal"]
-# }
+roo_path = "../../benchmarks/prism2jani/"
 
 files = {
-    "firewire_dl.v1.jani" : [{"delay" : 3, "deadline" : i} for i in range(200, 401, 10)],
-    #"eajs.2.v1.jani" : [{"energy_capacity": i, "B":4} for i in range(100, 150, 5)]
-
-    #有的instance 读取特别慢 eajs
-    # 有的instance特别大，有的instance
+    "consensus.2.v1.jani": [{"K": n} for n in range(8, 400, 8)]
 }
 
-properties = {
-    "firewire_dl.v1.jani" : ["deadline", "discunt", "horizon"]
-    #"eajs.2.v1.jani" : ["ExpUtil", "ProbUtil", "discunt", "horizon"]
-}
-
+properties = {"consensus.2.v1.jani": ["c2", "steps_max"]}
 
 def capture_output_c(fn, *args, **kwargs):
     old_stdout_fd = sys.stdout.fileno()
@@ -125,11 +80,11 @@ def run(file_name, param, props, rep=30):
         for prop in props:
             try:
                 if prop == "discunt":
-                    MDPData = model.getMDPData(props[0])
+                    MDPData = model.getMDPData(props[1])
                     dataMarmote = DataMarmote(MDPData)
                     mdp = dataMarmote.createMarmoteObject(discount=True)
                 elif prop == "horizon":
-                    MDPData = model.getMDPData(props[0])
+                    MDPData = model.getMDPData(props[1])
                     dataMarmote = DataMarmote(MDPData)
                     mdp = dataMarmote.createMarmoteObject(horizonFini=True)
                 else:
@@ -156,7 +111,7 @@ def run(file_name, param, props, rep=30):
                 }
 
                 try:
-                    time_VI, opt1, it_VI, d_VI = function(mdp.ValueIteration, 1e-8, 5000)
+                    time_VI, opt1, it_VI, d_VI = function(mdp.ValueIteration, 1e-8, 1000000000)
                     result.update({
                         "time_VI": time_VI,
                         "iters_VI": it_VI,
@@ -184,25 +139,25 @@ def run(file_name, param, props, rep=30):
                         result.update({
                             "time_VIGS": None, "iters_VIGS": None, "dist_VIGS": None
                         })
-                        time_RVI, opt5, it_RVI, d_RVI = function(mdp.RelativeValueIteration, 1e-8, 5000)
+                        time_RVI, opt5, it_RVI, d_RVI = function(mdp.RelativeValueIteration, 1e-8, 1000000000)
                         result.update({
                             "time_RVI": time_RVI,
                             "iters_RVI": it_RVI,
                             "dist_RVI": d_RVI
                         })
 
-                        for idx in range(1, 4):
-                            result[f"time_PI{idx}"] = None
-                            result[f"iters_PI{idx}"] = None
-                            result[f"dist_PI{idx}"] = None
-                            result[f"time_PIGS{idx}"] = None
-                            result[f"iters_PIGS{idx}"] = None
-                            result[f"dist_PIGS{idx}"] = None
-                        pd.DataFrame([result]).to_csv(output_file, mode="a", header=False, index=False)
+                        # for idx in range(1, 4):
+                        #     result[f"time_PI{idx}"] = None
+                        #     result[f"iters_PI{idx}"] = None
+                        #     result[f"dist_PI{idx}"] = None
+                        #     result[f"time_PIGS{idx}"] = None
+                        #     result[f"iters_PIGS{idx}"] = None
+                        #     result[f"dist_PIGS{idx}"] = None
+                        # pd.DataFrame([result]).to_csv(output_file, mode="a", header=False, index=False)
 
-                        continue
+                        # continue
                     else:
-                        time_VIGS, opt2, it_VIGS, d_VIGS = function(mdp.ValueIterationGS, 1e-8, 5000)
+                        time_VIGS, opt2, it_VIGS, d_VIGS = function(mdp.ValueIterationGS, 1e-8, 1000000000)
                         result.update({
                             "time_VIGS": time_VIGS,
                             "iters_VIGS": it_VIGS,
@@ -211,12 +166,12 @@ def run(file_name, param, props, rep=30):
                         result.update({"time_RVI": None, "iters_RVI": None, "dist_RVI": None})
 
                     for idx, (eps, inner) in enumerate([(0.01, 500), (1e-4, 1500), (1e-7, 5000)], 1):
-                        t_PI, opt3, it_PI, d_PI = function(mdp.PolicyIterationModified, 1e-8, 5000, eps, inner)
+                        t_PI, opt3, it_PI, d_PI = function(mdp.PolicyIterationModified, 1e-8, 1000000000, eps, inner)
                         result[f"time_PI{idx}"] = t_PI
                         result[f"iters_PI{idx}"] = it_PI
                         result[f"dist_PI{idx}"] = d_PI
 
-                        t_PIGS, opt4, it_PIGS, d_PIGS = function(mdp.PolicyIterationModifiedGS, 1e-8, 5000, eps, inner)
+                        t_PIGS, opt4, it_PIGS, d_PIGS = function(mdp.PolicyIterationModifiedGS, 1e-8, 1000000000, eps, inner)
                         result[f"time_PIGS{idx}"] = t_PIGS
                         result[f"iters_PIGS{idx}"] = it_PIGS
                         result[f"dist_PIGS{idx}"] = d_PIGS
@@ -239,7 +194,7 @@ def run(file_name, param, props, rep=30):
 
 
 if __name__ == '__main__':
-    output_file = ("firewire_test.csv")
+    output_file = "iterData.csv"
     completed = set()
 
     header = [
@@ -263,5 +218,5 @@ if __name__ == '__main__':
     for file_name, param_list in files.items():
         for param in param_list:
             key = (file_name, str(param))
-            run(file_name, param, properties[file_name], rep=20)
+            run(file_name, param, properties[file_name], rep=1)
             print(f"finished: {file_name} param: {param}")
