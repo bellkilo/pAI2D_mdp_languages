@@ -14,6 +14,8 @@ try:
 except ImportError:
     pass
 
+import requests
+
 # Set of supported unary operators.
 UNARY_OPERATORS = {
     '¬',
@@ -50,22 +52,35 @@ class JaniReader(object):
     """A reader for JANI (Json Automata Network Interface) model files.
     Parse the JANI model specification and build the corresponding model objects."""
 
-    def __init__(self, path, modelParams=dict()):
+    def __init__(self, path, modelParams=dict(), isLocalPath=True):
         """Initialize the JANI reader.
 
         Parameters:
-            path: Path to target JANI model file.
+            path: Local path or url path to the target JANI file.
 
             modelParams: Dictionary of model parameters (constants).
+
+            isLocalPath: Indicate whether the 'path' filed is a local path or not.
         """
         assert isinstance(modelParams, dict)
         self._path = path
         self._modelParams = modelParams
+        self._isLocalPath = isLocalPath
     
+    def _load(self):
+        if self._isLocalPath:
+            with open(self._path, "r", encoding="utf-8-sig") as file:
+                res = loads(file.read())
+        else:
+            res = requests.get(self._path)
+            res.raise_for_status()
+            res = loads(res.text)
+        return res
+
+
     def build(self):
         """Parse and build a JANI model from the target file."""
-        with open(self._path, "r", encoding="utf-8-sig") as file:
-            modelStruct = loads(file.read())
+        modelStruct = self._load()
         print("Start parsing")
         model = self._parseModel(modelStruct)
         print("Parsing success")
@@ -529,9 +544,9 @@ class JaniReader(object):
                 raise SyntaxError()
             values = propertyExpression["values"]
 
-            criterion, mdpType, fs, reward = self.parsePropExprValues(model, values, scope)
-            print(name, criterion, mdpType, fs, reward)
-            model.addProperty(Property(name, criterion, mdpType, fs, reward))
+            criterion, mdpType, fs, reward, horizon = self.parsePropExprValues(model, values, scope)
+            print(name, criterion, mdpType, fs, reward, horizon)
+            model.addProperty(Property(name, criterion, mdpType, fs, reward, horizon))
     
     def parsePropExprValues(self, model, propExprValues, scope):
         operator = propExprValues["op"]
@@ -551,12 +566,23 @@ class JaniReader(object):
                     terminalStateExpr = Expression("∨",
                                                    Expression("¬", leftExpr),
                                                    rightExpr)
-            return criterion, "TotalRewardMDP", terminalStateExpr, rewardExpr
+            return criterion, "TotalRewardMDP", terminalStateExpr, rewardExpr, None
         if operator in ["Emax", "Emin"]:
             criterion = operator[1:]
-            reach = self._parseExpression(model, propExprValues["reach"], scope)
+            if "reach" in propExprValues:
+                reach = self._parseExpression(model, propExprValues["reach"], scope)
+                horizon = None
+                resolutionModel = "AverageMDP"
+            else:
+                reach = Expression("bool", False)
+                horizon = self._parseExpression(model, propExprValues["step-instant"], scope)
+                if not horizon.isConstExpression():
+                    raise RequiredConstantExpressionError(f"step-instant '{horizon}' value must be constant expression")
+                horizon = horizon.eval()
+                resolutionModel = "FiniteHorizonMDP"
             exp = self._parseExpression(model, propExprValues["exp"], scope)
-            return criterion, "AverageMDP", reach, exp
+            return criterion, resolutionModel, reach, exp, horizon
+            
         
         if operator in UNARY_OPERATORS:
             return self.parsePropExprValues(model, propExprValues["exp"], scope)

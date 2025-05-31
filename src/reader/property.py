@@ -1,10 +1,11 @@
 class Property(object):
-    def __init__(self, name, criterion, resolutionModel, terminalStateExpression, rewardExpression):
+    def __init__(self, name, criterion, resolutionModel, terminalStateExpression, rewardExpression, horizon):
         self._name = name
         self._criterion = criterion
         self._resolutionModel = resolutionModel
         self._terminalStateExpression = terminalStateExpression
         self._rewardExpression = rewardExpression
+        self._horizon = horizon
     
     @property
     def name(self):
@@ -25,3 +26,7 @@ class Property(object):
     @property
     def rewardExpression(self):
         return self._rewardExpression
+    
+    @property
+    def horizon(self):
+        return self._horizon

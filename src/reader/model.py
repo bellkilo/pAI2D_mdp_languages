@@ -412,6 +412,7 @@ class JaniModel(object):
             "type": self._type,
             "resolution-model": prop.resolutionModel,
             "criterion": criterion,
+            "horizon": prop.horizon,
             "states": set(stateToTupReprs.values()),
             "initial-states": [ stateToTupReprs[s] for s in initStates ],
             "absorbing-states": { stateToTupReprs[s] for s in absorbingStates },
@@ -419,8 +420,7 @@ class JaniModel(object):
             "transition-dict": transitionDict,
             "state-template": stateTemplate,
             "state-variable-types": stateVarTypes,
-            "state-variable-initial-values": stateVarInitValues
-
+            "state-variable-initial-values": stateVarInitValues,
         }
         return MDPData
 

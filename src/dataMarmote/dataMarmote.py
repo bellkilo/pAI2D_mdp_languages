@@ -29,10 +29,13 @@ class DataMarmote:
 
         self._criterion = data.get("criterion")
         self._resolutionModel = data.get("resolution-model")
-        # self._gamma = data.get("gamma")
-        # self._horizon = data.get("horizon")
-        self._gamma = 0.9
-        self._horizon = 1
+
+        self._horizon = data.get("horizon")
+        self._gamma = data.get("gamma")
+        if self._gamma is None and self._horizon is not None:
+            self._gamma = .95
+        # self._gamma = 0.9
+        # self._horizon = 1
         self._initStates = data.get("initial-states")
         self._stateVarInitValues = data.get("state-variable-initial-values")
 
@@ -173,7 +176,7 @@ class DataMarmote:
                             if row_sum < 1.0:
                                 missing_prob = 1.0 - row_sum
                                 transitionMatrix.addEntry(sIdx, sIdx, missing_prob)
-                                rewardMatrix.addEntry(sIdx, sIdx, 0.0)
+                                # rewardMatrix.addEntry(sIdx, sIdx, 0.0)
                             else:
                                 raise Exception(
                                     f"Invalid transition probabilities for state {sTupRepr}, action {act}: sum = {row_sum}")
