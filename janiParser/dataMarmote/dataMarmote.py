@@ -2,8 +2,8 @@ import json
 import os
 from typing import Optional, Dict, List, Set, Union
 
-from src.reader.variable import Type
-from src.exception import *
+from janiParser.reader.variable import Type
+from janiParser.exception import *
 
 import marmote.core as mc
 import marmote.markovchain as mmc
