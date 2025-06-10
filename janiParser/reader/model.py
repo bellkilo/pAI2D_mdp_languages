@@ -253,6 +253,10 @@ class JaniModel(object):
             raise KeyError(f"Property '{name}' already exists in model '{self.name}'")
         self._properties[name] = property
 
+    def getPropertyNames(self):
+        """Return all property names."""
+        return self._properties.keys()
+    
     def exploreStateSpace(self, initStates, stateTemplate, terminalStateExpr, rewardExpr, singleActRequirement=False):
         """Explore all reachable states from initial states.
 
