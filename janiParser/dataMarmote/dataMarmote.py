@@ -9,6 +9,11 @@ import marmote.core as mc
 import marmote.markovchain as mmc
 import marmote.mdp as mmdp
 
+import numpy as np
+import scipy.sparse as ss
+
+from typing import Tuple, List
+
 class DataMarmote:
     def __init__(self, data):
         if not isinstance(data, dict):
@@ -22,7 +27,7 @@ class DataMarmote:
         self._type = data["type"]
         self._states = data["states"]
         self._absorbingStates = data["absorbing-states"]
-        self._actions = data["actions"]
+        self._actions: dict = data["actions"]
         self._transitionDict = data["transition-dict"]
         self._stateTemplate = data["state-template"]
         self._stateVarTypes = data["state-variable-types"]
@@ -267,6 +272,56 @@ class DataMarmote:
     #                 P.setEntry(i,j,value)
     #         P.set_type(DISCRETE)
     #         return MarkovChain(P)
+
+    def buildTransitionRewardForMDPToolBox(self) -> Tuple[List[ss.csr_matrix],
+                                                          np.ndarray]:
+        # n: the cardinality of the state space.
+        # m: the cardinality of the action sapce.
+        n, m = len(self._states), len(self._actions)
+
+        # Save these variables as local variables to slightly accelerate access.
+        transitionDict = self._transitionDict
+        absorbingStates = self._absorbingStates
+        stateTupReprToIdx = self._stateTupReprToIdx
+        # The panality value for performing an unauthorized action in a particular state.
+        penality = -1e10 if self._criterion == "max" else 1e10
+
+        transitionMatrices = []
+        rewardMatrix = np.zeros((n, m), dtype=np.float64)
+        for act, actIdx in self._actions.items():
+            transitionMatrix = ss.lil_matrix((n, n), dtype=np.float64)
+
+            for sTupRepr, sPrimeMap in transitionDict[act].items():
+                sIdx = stateTupReprToIdx[sTupRepr]
+                rewardSum = 0.
+                rowProbSum = 0.
+
+                # If 'sPrimeMap' is not an empty dictionary, i.e. there are transitions from the current state.
+                if sPrimeMap:
+                    for sPrimeTupRepr, data in sPrimeMap.items():
+                        prob, reward = data
+
+                        sPrimeIdx = stateTupReprToIdx[sPrimeTupRepr]
+                        transitionMatrix[sIdx, sPrimeIdx] = prob
+
+                        rewardSum += (prob * reward)
+                        rowProbSum += prob
+                    
+                    # If the sum of probabilities is not equal to 1.
+                    if abs(rowProbSum - 1.) > 1e-10:
+                        if 0. < rowProbSum < 1.:
+                            transitionMatrix[sIdx, sIdx] = 1. - rowProbSum
+                        else:
+                            raise Exception(f"Invalid transition probabilities for state {sTupRepr}, action {act}: sum = {rowProbSum}")
+                    rewardMatrix[sIdx, actIdx] = rewardSum
+                else:
+                    transitionMatrix[sIdx, sIdx] = 1.
+                    # If the current state is not in the set of absorbing states,
+                    # then the current state is not authorized to perform the 'act' action.
+                    if sTupRepr not in absorbingStates:
+                        rewardMatrix[sIdx, actIdx] = penality
+            transitionMatrices.append(transitionMatrix.tocsr())
+        return transitionMatrices, rewardMatrix
 
     @staticmethod
     def _build_expression(variables, values):
