@@ -33,14 +33,14 @@ class DataMarmote:
         self._stateVarTypes = data["state-variable-types"]
 
         self._criterion = data.get("criterion")
-        self._resolutionModel = data.get("resolution-model")
-
         self._horizon = data.get("horizon")
         self._gamma = data.get("gamma")
-        if self._gamma is None and self._horizon is not None:
+
+        if self._horizon is None:
+            self._horizon = 1
+        if self._gamma is None:
             self._gamma = .95
-        # self._gamma = 0.9
-        # self._horizon = 1
+
         self._initStates = data.get("initial-states")
         self._stateVarInitValues = data.get("state-variable-initial-values")
 
@@ -197,7 +197,7 @@ class DataMarmote:
             self._rewardMatrices = rewardMatrices
             self._isInstantiate = True
 
-        MDPType = self._resolutionModel if self._type == "mdp" else self._type
+        MDPType = self._type
         if discount:
             MDPType = "DiscountedMDP"
         if horizonFini:
@@ -359,12 +359,8 @@ class DataMarmote:
         modelStruct = dict()
         modelStruct["name"] = self._name
 
-        isMCModel = self._type in ["dtmc", "MarkovChain"]
-        if self._type not in ["mdp", "dtmc"]:
-            modelStruct["type"] = self._type
-        else:
-            print(self._resolutionModel)
-            modelStruct["type"] = self._resolutionModel
+        isMCModel = self._type == "MarkovChain"
+        modelStruct["type"] = self._type
         
         if self._criterion is not None:
             modelStruct["criterion"] = self._criterion

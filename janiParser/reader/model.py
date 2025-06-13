@@ -413,8 +413,7 @@ class JaniModel(object):
 
         MDPData = {
             "name": self._name,
-            "type": self._type,
-            "resolution-model": prop.resolutionModel,
+            "type": prop.resolutionModel,
             "criterion": criterion,
             "horizon": prop.horizon,
             "states": set(stateToTupReprs.values()),
@@ -460,8 +459,7 @@ class JaniModel(object):
 
         MCData = {
             "name": self._name,
-            "type": self._type,
-            "resolution-model": "MarkovChain",
+            "type": "MarkovChain",
             "states": set(stateToTupReprs.values()),
             "initial-states": [ stateToTupReprs[s] for s in initStates ],
             "absorbing-states": { stateToTupReprs[s] for s in absorbingStates },
@@ -669,4 +667,7 @@ class JaniRModel(JaniModel):
             "state-variable-initial-values": stateVarInitValues,
         }
         return MCData
-
+    
+    @override
+    def getPropertyNames(self):
+        raise UnsupportedFeatureError(f"Propertices does not support by JaniR model '{self._name}'")
