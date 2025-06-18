@@ -1,6 +1,4 @@
 import json
-import os
-from typing import Optional, Dict, List, Set, Union
 
 from janiParser.reader.variable import Type
 from janiParser.exception import *
@@ -11,8 +9,6 @@ import marmote.mdp as mmdp
 
 import numpy as np
 import scipy.sparse as ss
-
-from typing import Tuple, List
 
 class DataMarmote:
     def __init__(self, data):
@@ -91,7 +87,7 @@ class DataMarmote:
                        type,
                        stateSpace: mc.MarmoteBox,
                        actionSpace,
-                       transitionMatrices:List[mc.SparseMatrix],
+                       transitionMatrices: list[mc.SparseMatrix],
                        rewardMatrices,
                        gamma=None,
                        horizon=None):
@@ -277,13 +273,13 @@ class DataMarmote:
 
         # Save theses variables as local variables to slightly accelerate memory access.
         # Format: { action: { current state: { next state: [ probability, reward ] } } }
-        transitionDict = self._transitionDict
+        transitionDict: dict[str, dict[tuple, dict[tuple, np.ndarray]]] = self._transitionDict
 
         # A set of absorbing states defined in the model.
-        absorbingStates = self._absorbingStates
+        absorbingStates: set[tuple] = self._absorbingStates
 
         # A dictionary that maps a unique index to each state.
-        stateTupReprToIdx = self._stateTupReprToIdx
+        stateTupReprToIdx: dict[tuple, int] = self._stateTupReprToIdx
 
         # Penality applied when an unauthorized action is performed in a state. 
         penality = -1e-10 if self._criterion == "max" else 1e10

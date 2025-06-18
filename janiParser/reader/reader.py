@@ -1,13 +1,13 @@
 from json import loads
 import numpy as np
 
-from .model import JaniModel, JaniRModel
-from .variable import Type, Constant, Variable
-from .expression import Expression
-from .automata import Automata, Edge, EdgeDestination
-from .function import Function
-from .property import Property
-from ..exception import *
+from janiParser.reader.model import JaniModel, JaniRModel
+from janiParser.reader.variable import Type, Constant, Variable
+from janiParser.reader.expression import Expression
+from janiParser.reader.automata import Automata, Edge, EdgeDestination
+from janiParser.reader.function import Function
+from janiParser.reader.property import Property
+from janiParser.exception import *
 
 try:
     from typing_extensions import override
@@ -544,9 +544,13 @@ class JaniReader(object):
                 raise SyntaxError()
             values = propertyExpression["values"]
 
-            criterion, mdpType, fs, reward, horizon = self.parsePropExprValues(model, values, scope)
-            print(name, criterion, mdpType, fs, reward, horizon)
-            model.addProperty(Property(name, criterion, mdpType, fs, reward, horizon))
+            try:
+                criterion, mdpType, fs, reward, horizon = self.parsePropExprValues(model, values, scope)
+                # print(name, criterion, mdpType, fs, reward, horizon)
+                model.addProperty(Property(name, criterion, mdpType, fs, reward, horizon))
+            except:
+                # print(f"Failed to parser property '{name}'")
+                continue
     
     def parsePropExprValues(self, model, propExprValues, scope):
         operator = propExprValues["op"]
@@ -737,61 +741,61 @@ class JaniRReader(JaniReader):
             edgeDests.append(EdgeDestination(dest, prob, assgns, reward))
         return Edge(src, act, guard, edgeDests)
     
-if __name__ == "__main__":
-    ###########################################################
-    # PPDDL instances
+# if __name__ == "__main__":
+#     ###########################################################
+#     # PPDDL instances
 
-    # 462400 states
-    # 22 actions
-    # 3851520 transitions and 0 deadlocks
-    # In total, 3851520 transitions
-    # python3 reader.py  1149,72s user 3,50s system 99% cpu 19:17,56 total
+#     # 462400 states
+#     # 22 actions
+#     # 3851520 transitions and 0 deadlocks
+#     # In total, 3851520 transitions
+#     # python3 reader.py  1149,72s user 3,50s system 99% cpu 19:17,56 total
 
-    # path = "../../benchmarks/ppddl2jani/zenotravel.4-2-2.v1man.jani"
-    # reader = JaniReader(path, modelParams={})
+#     # path = "../../benchmarks/ppddl2jani/zenotravel.4-2-2.v1man.jani"
+#     # reader = JaniReader(path, modelParams={})
 
-    ###########################################################
-    # Prism instances
+#     ###########################################################
+#     # Prism instances
 
-    # 1296 states
-    # 3 actions
-    # 2412 transitions and 0 deadlocks
-    # In total, 2412 transitions
-    # python3 reader.py  0,44s user 0,02s system 99% cpu 0,470 total
-    path = "../../benchmarks/prism2jani/consensus.2.v1.jani"
-    reader = JaniReader(path, modelParams={ "K": 10 })
+#     # 1296 states
+#     # 3 actions
+#     # 2412 transitions and 0 deadlocks
+#     # In total, 2412 transitions
+#     # python3 reader.py  0,44s user 0,02s system 99% cpu 0,470 total
+#     path = "../../benchmarks/prism2jani/consensus.2.v1.jani"
+#     reader = JaniReader(path, modelParams={ "K": 10 })
 
-    # path = "../../benchmarks/prism2jani/csma.2-2.v1.jani"
-    # reader = JaniReader(path, modelParams={})
+#     # path = "../../benchmarks/prism2jani/csma.2-2.v1.jani"
+#     # reader = JaniReader(path, modelParams={})
 
-    # 12828 states
-    # 1 actions
-    # 21795 transitions and 0 deadlocks
-    # In total, 21795 transitions
-    # python3 reader.py  343,71s user 0,28s system 99% cpu 5:44,92 total
-    # path = "../../benchmarks/prism2jani/eajs.2.v1.jani"
-    # reader = JaniReader(path, modelParams={ "energy_capacity": 100, "B": 100 })
+#     # 12828 states
+#     # 1 actions
+#     # 21795 transitions and 0 deadlocks
+#     # In total, 21795 transitions
+#     # python3 reader.py  343,71s user 0,28s system 99% cpu 5:44,92 total
+#     # path = "../../benchmarks/prism2jani/eajs.2.v1.jani"
+#     # reader = JaniReader(path, modelParams={ "energy_capacity": 100, "B": 100 })
 
-    # 956 states
-    # 6 actions
-    # 3696 transitions and 0 deadlocks
-    # In total, 3696 transitions
-    # python3 reader.py  0,50s user 0,02s system 99% cpu 0,522 total
-    # path = "../../benchmarks/prism2jani/philosophers-mdp.3.v1.jani"
-    # reader = JaniReader(path, modelParams={})
+#     # 956 states
+#     # 6 actions
+#     # 3696 transitions and 0 deadlocks
+#     # In total, 3696 transitions
+#     # python3 reader.py  0,50s user 0,02s system 99% cpu 0,522 total
+#     # path = "../../benchmarks/prism2jani/philosophers-mdp.3.v1.jani"
+#     # reader = JaniReader(path, modelParams={})
 
 
-    # 96894 states
-    # 10 actions
-    # 129170 transitions and 0 deadlocks
-    # In total, 129170 transitions
-    # python3 reader.py  1714,69s user 2,12s system 99% cpu 28:43,84 total
-    # path = "../../benchmarks/prism2jani/pacman.v2.jani"
-    # reader = JaniReader(path, modelParams={ "MAXSTEPS": 15 })
+#     # 96894 states
+#     # 10 actions
+#     # 129170 transitions and 0 deadlocks
+#     # In total, 129170 transitions
+#     # python3 reader.py  1714,69s user 2,12s system 99% cpu 28:43,84 total
+#     # path = "../../benchmarks/prism2jani/pacman.v2.jani"
+#     # reader = JaniReader(path, modelParams={ "MAXSTEPS": 15 })
 
-    # reader.build().writeJaniR("out.txt", "all_before_min")
-    # model = JaniRReader("out.txt", {}).build()
-    # stateSpace, actionSpace, Transitions, Rewards = model.buildTransitionAndReward()
-    # mdp = mmdp.TotalRewardMDP(model.criterion, stateSpace, actionSpace, Transitions, Rewards)
-    # with open("out_1.txt", "w") as file:
-    #     print(mdp.ValueIteration(1e-10, 1000), file=file)
+#     # reader.build().writeJaniR("out.txt", "all_before_min")
+#     # model = JaniRReader("out.txt", {}).build()
+#     # stateSpace, actionSpace, Transitions, Rewards = model.buildTransitionAndReward()
+#     # mdp = mmdp.TotalRewardMDP(model.criterion, stateSpace, actionSpace, Transitions, Rewards)
+#     # with open("out_1.txt", "w") as file:
+#     #     print(mdp.ValueIteration(1e-10, 1000), file=file)

@@ -1,5 +1,5 @@
 from janiParser.reader.reader import JaniReader
-from janiParser.dataMarmote.dataMarmote import DataMarmote
+from janiParser.dataMarmote import DataMarmote
 
 import pickle
 import os

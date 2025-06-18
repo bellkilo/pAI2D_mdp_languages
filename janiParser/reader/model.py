@@ -2,17 +2,13 @@ from itertools import product
 from collections import deque
 from copy import deepcopy
 
-# import json
 import numpy as np
 
-from .automata import Automata, Edge, EdgeDestination
-from .variable import Type
-from .expression import Expression
-from .state import State
-from ..exception import *
-
-import marmote.core as mc
-import marmote.mdp as mmdp
+from janiParser.reader.automata import Automata, Edge, EdgeDestination
+from janiParser.reader.variable import Type
+from janiParser.reader.expression import Expression
+from janiParser.reader.state import State
+from janiParser.exception import *
 
 try:
     from typing_extensions import override
