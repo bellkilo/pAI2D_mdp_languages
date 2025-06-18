@@ -9,7 +9,6 @@ setup(
     url="https://github.com/bellkilo/pAI2D_mdp_languages",
     packages=find_packages(),
     install_requires=[
-        "marmote",
         "mdptoolbox",
         "numpy",
         "scipy"
