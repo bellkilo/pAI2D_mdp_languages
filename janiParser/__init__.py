@@ -1,4 +1,4 @@
-from .reader.reader import JaniReader, JaniRReader
-from .dataMarmote import DataMarmote
+from janiParser.reader.reader import JaniReader, JaniRReader
+from janiParser.dataMarmote import DataMarmote
 
-from .utils import buildAndSaveMDPModelFromQCompBenchmark, loadDataMarmoteFromPickleFile
+from janiParser.utils import buildAndSaveMDPModelFromQCompBenchmark, loadDataMarmoteFromPickleFile
