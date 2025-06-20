@@ -10,6 +10,8 @@ import marmote.mdp as mmdp
 import numpy as np
 import scipy.sparse as ss
 
+_penality = -1e32
+
 class DataMarmote:
     def __init__(self, data):
         if not isinstance(data, dict):
@@ -152,7 +154,8 @@ class DataMarmote:
             transtionDict = self._transitionDict
             absorbingStates = self._absorbingStates
             stateTupReprToIdx = self._stateTupReprToIdx
-            penality = -1e10 if self._criterion == "max" else 1e10
+
+            penality = _penality if self.isMaximisation() else -_penality
 
             transitionMatrices = [mc.SparseMatrix(n) for _ in range(m)]
             rewardMatrices = [mc.SparseMatrix(n) for _ in range(m)]
@@ -226,7 +229,6 @@ class DataMarmote:
                                          self._horizon,
                                          self._gamma)
 
-
     def createMCObject(self):
         transitionDict = self._transitionDict
         n = len(self._states)
@@ -281,8 +283,10 @@ class DataMarmote:
         # A dictionary that maps a unique index to each state.
         stateTupReprToIdx: dict[tuple, int] = self._stateTupReprToIdx
 
+        isMaximisation = self.isMaximisation()
+
         # Penality applied when an unauthorized action is performed in a state. 
-        penality = -1e-10 if self._criterion == "max" else 1e10
+        penality = _penality
 
         transitionMatrices = []
         rewardMatrix = np.zeros((n, m), dtype=np.float64)
@@ -313,7 +317,7 @@ class DataMarmote:
                         else:
                             raise ValueError(f"Invalid transition probabilities for state {sTupRepr} and action {act}: total = {probSum}")
                     
-                    rewardMatrix[sIdx, actIdx] = rewardSum
+                    rewardMatrix[sIdx, actIdx] = rewardSum if isMaximisation else -rewardSum
                 else:
                     transitionMatrix[sIdx, sIdx] = 1.
 
@@ -322,6 +326,7 @@ class DataMarmote:
                     if sTupRepr not in absorbingStates:
                         rewardMatrix[sIdx, actIdx] = penality
             transitionMatrices.append(transitionMatrix.tocsr())
+        print("Build success - Transition and Reward matrices")
         return transitionMatrices, rewardMatrix
 
     @staticmethod
@@ -453,3 +458,43 @@ class DataMarmote:
         with open(filename, "w", encoding="utf-8-sig") as file:
             file.write(json.dumps(modelStruct, indent=4, ensure_ascii=False))
         print(f"Save success - saved file '{filename}'")
+
+    def nbStates(self) -> int:
+        """Return the number of states."""
+        return len(self._states)
+    
+    def nbActions(self) -> int:
+        """Return the number of actions."""
+        return len(self._actions)
+    
+    def setMDPTypeTo(self, mdpType: str, discount: float=.95, horizon: int=1) -> None:
+        """Set MDP model type and associated parameters.
+        
+        Parameters:
+            mdpType (str): The MDP model type.
+            
+            discount (float): The discount facotor used in 'DiscountedMDP' and 'FiniteHorizonMDP'.
+
+            horizon (int): The horizon length used in 'FiniteHorizonMDP'.
+        """
+        # Check input argument: 'mdpType'.
+        if self._type == "MarkovChain":
+            raise Exception("Current model is not a MDP model")
+        if mdpType not in ["DiscountedMDP", "AverageMDP", "TotalRewardMDP", "FiniteHorizonMDP"]:
+            raise ValueError(f"Unsupported MDP model type: {mdpType}")
+        
+        # Check input argument: 'discount'.
+        if not (0 < discount <= 1):
+            raise ValueError("Discount factor must be a float in the range (0, 1]")
+        
+        # Check input argument: "horizon"
+        if horizon < 0:
+            raise ValueError("Horizon length must be a non-negative integer")
+        
+        self._type = mdpType
+        self._gamma = discount
+        self._horizon = horizon
+
+    def isMaximisation(self) -> bool:
+        """Return True if the optimization criterion is 'max', otherwise False."""
+        return self._criterion == "max"
