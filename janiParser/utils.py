@@ -333,6 +333,7 @@ def benchmarkJaniMDPModel(fullModelName: str,
         mdpType = "TotalRewardMDP"
     elif discount == -1:
         mdpType = "AverageMDP"
+        discount = 1
     else:
         raise Exception(f"Invalid discount factor value: {discount}")
     
