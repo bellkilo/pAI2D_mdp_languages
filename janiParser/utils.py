@@ -11,7 +11,7 @@ import mdptoolbox
 def saveMDPModelsFromQComp(fullModelName: str, modelParams: dict={}, replace: bool=False) -> list[str]:
     """Download the specified `.jani` file available online at `https://qcomp.org/benchmarks/`,
     buids and saves one or more DataMarmote objects as `.pkl` files.  
-    Each property defined in the target file results in a distinct `.pkl` file contaning
+    Each property defined in the target file results in a distinct `.pkl` file containing
     the corresponding DataMarmote object.
 
     Parameters:

@@ -1,174 +1,153 @@
-# Documentation
+# AI2D Project 2024-2025: Comparison of Methods for Solving MDPs on Modeling Language Instances
 
-## `janiParser.dataMarmote.dataMarmote.DataMarmote`
-### Constructor
-**`DataMarmote(data: dict)`**
+## Project Overview
+**For this project, we primarily implemented a parser that translates a specific subset of JANI files into corresponding Marmote instances.** This parser does not support the full JANI specification; it is limited to discrete-time Markov models, specifically **Discrete-Time Markov Chains (DTMC)** and **Discrete-Time Markov Decision Processes (MDP)**.  
+We also introduce an extension to JANI, named JANI-R, to overcome the expressiveness limitations of the standard JANI format for MDP modeling. Unlike the original JANI specification, which only supports shortest or longest path objectives, JANI-R enables a more general representation of MDPs.
 
-**Parameters**:
+This project was carried out by **`Zeyu TAO`** and **`Jiahua LI`**, under the supervision of **`Mr. Emmanuel HYON`** and **`Mr. Pierre-Henri WUILLEMIN`**.
 
-* **data**: A dictionary that contains at least the following information:
+## Installation
+### Prerequistes
+* **[marmote](https://marmote.gitlabpages.inria.fr/marmote/index.html)**
+* **[pymdptoolbox](https://pymdptoolbox.readthedocs.io/en/latest/index.html)**
+* **[numpy](https://numpy.org)**
+* **[scipy](https://scipy.org)**
 
-    * **name**: The name of the model.
-
-    * **type**: The model type. Supported types include: `DiscountedMDP`, `AverageMDP`, `TotalRewardMDP`, `FiniteHorizonMDP` and `MarkovChain`.
-
-    * **states**: A set of states, where each state is represented by a tuple to reduce memory usage.
-
-    * **actions**: A set of actions available.
-
-    * **transition-dict**: A dictionary that contains transition probabilities and rewards. Its structure depends on the model types:
-
-        * For MDPs: `[action][state][next state]` -> `[probability, reward]`
-        
-        * For MCs: `[state][next state]` -> `probability`
-    
-    * **absorbing-states**: A set of absorbing states (i.e., states with no outgoing transitions).
-
-    * **state-template**: A template that defines the encoding of states. It is a dictionary that maps each state variable to a unique index, indicating its position in the tuple representation. This is typically used to interpret tuple-encoded states and to ensure a stable state variable order.
-
-    * **state-variable-types**: A dictionary that maps each state variable to its type definition. This is typically used when converting to a `.janir` file.
-
-    * **initial-states**: A list of initial states, where each state is represented by a tuple.
-
-    * **state-variable-initial-values**: A dictionary that maps state variables to their initial values.
-
-    * **criterion**: The optimization criterion used for the model. **If the model type is `MarkovChain`, then this field is not required.**
-
-### Methods
-* **`createMarmoteObject()`**
-
-    **Construct and return a Marmote object using the data given during class construction.**
-
-* **`buildTransitionRewardForMDPToolbox()`**
-
-    **Build the transition matrices as a list of SciPy sparse matrices and the reward matrix as a full matrix (NumPy 2D array). These parameters are then passed to `MDPToolbox` to solve the `MDP` problem.**
-
-* **`saveAsJaniRFile(path: str)`**
-
-    **Convert the current model to a `.janir` file and save it to the specified path.**
-
-    **Parameters**:
-
-    * **path**: File path where the generated `.janir` file will be saved.
-
-* **`getInitStatesIdx()`**
-
-    **Return the list of initial states.**
-
-* **`stateToIdx(state: tuple)`**
-
-    **Return the unique index corresponding to the specified state.**
-
-    **Parameters**:
-
-    * **state**: A tuple representation of a specific state.
-
-* **`ìdxToState(idx: int)`**
-
-    **Return the state corresponding to the index.**
-
-    **Parameters**:
-
-    * **idx**: An integer that represents the index of the constructed matrices.
-
-## `janiParser.reader.reader.JaniReader`
-### Constructor
-`JaniReader(path: str, modelParams: dict, isLocalPath: bool)`
-
-**Parameters**:
-
-* **path**: A path to the `.jani` file, which can be a local path or a URL path.
-
-* **modelParams**: Optional parameter used to configure a scalable model. It defaults to an empty dictionary.
-
-* **isLocalPath**: A boolean that indicates whether the given path is a local file path or not. It defaults to True.
-
-**Examples**:
-```python
-from janiParser.reader.reader import JaniReader
-
-# Example of using a local file path.
-reader = JaniReader("./benchmarks/prism2jani/consensus.2.v1.jani", modelParams={ "K": 10 })
+To install the above dependencies, use the following command:
+```bash
+conda install -c marmote -c conda-forge  marmote=1.2.0
+pip install pymdptoolbox, numpy, scipy
 ```
 
-```python
-# Example of using a URL path.
-reader = JaniReader("https://qcomp.org/benchmarks/mdp/consensus/consensus.2.jani", modelParams={ "K": 10 }, isLocalPath=False)
+### Installation via Git
+```bash
+git clone git@github.com:bellkilo/pAI2D_mdp_languages.git
 ```
 
-### Methods
-* **`build()`**
+### Installation via Pip
+```bash
+pip install git+https://github.com/bellkilo/pAI2D_mdp_languages
+```
 
-    **Load and parse the target file specified during class construction to build a JANI model representation. It returns an instance of class `JaniModel`.**
+## Usage
+### System Architecture
+<img src="../architecture.png" width="50%">
 
-## `janiParser.reader.reader.JaniRReader`
-### Constructor
-`Bases: janiParser.reader.reader.JaniReader`
+### JANI $\rightarrow$ Marmote Instance
+```python
+import janiParser
 
-`JaniRReader(path: str, modelParams: dict)`
+# Initialize reader.
+# This class requires at least the local file path or URL path to the target file.
+# (See janiParser/doc.md for more details about the JaniReader class.)
+# Example of using the local file path.
+# reader = janiParser.JaniReader("./benchmarks/prism2jani/philosophers-mdp.3.v1.jani")
 
-**Parameters**:
+# Example of using the URL path.
+reader = janiParser.JaniReader("https://qcomp.org/benchmarks/mdp/philosophers-mdp/philosophers-mdp.3.jani", isLocalPath=False)
 
-* **path**: A path to the `.janir` file. It accepts only the local file path.
+model = reader.build()
+# The getMDPData(...) function takes as argument the name of the property
+# to be modeled. (JANI limitation.)
+# Note that a JANI file may define multiple properties,
+# and each of which can correspond to a distinct instance of the MDP problem.
+MDPData = model.getMDPData("eat")
 
-* **modelParams**: Optional parameter used to configure a scalable model. It defaults to an empty dictionary.
+dataMarmote = janiParser.DataMarmote(MDPData)
+mdp = dataMarmote.createMarmoteObject()
+```
 
-### Methods
-* **`build()`**
+### JANI $\rightarrow$ JANI-R
+```python
+# Save as extended format JANI-R.
+dataMarmote.saveAsJaniRFile("./output.janir")
+```
 
-    **Load and parse the target file specified during class construction to build a JANIR model representation. It returns an instance of class `JaniRModel`.**
+### JANI-R $\rightarrow$ Marmote Instance
+```python
+# This class works in the same way as JaniReader, but it does not support the URL path,
+# which only takes as argument the local file path to the target file.
+reader = janiParser.JaniRReader("./output.janir")
 
-## `janiParser.reader.model.JaniModel`
-### Constructor
-`JaniModel(name: str, type: str)`
+model = reader.build()
+# Since JANI-R defines MDPs generally, no specific property needs to be specified.
+MDPData = model.getMDPData()
 
-**Parameters**:
+dataMarmote = janiParser.DataMarmote(MDPData)
+mdp = dataMarmote.createMarmoteObject()
+```
 
-* **name**: The name of the model.
+### Benchmarking
+```python
+_fullModelName = "consensus.2.jani"
+_modelParams = { "K": 10 }
+_resolMethods = ["ValueIteration", "ValueIterationGS", "PolicyIterationModified"]
+_discount = .95
+_maxIter = 1_000_000_000
 
-* **type**: The type of the model specified according to the JANI standard. **In this project, only `dtmc` and `mdp` types are supported.**
+res  = janiParser.benchmarkJaniMDPModel(_fullModelName,
+                                        solverName="Marmote",
+                                        replace=True,
+                                        modelParams=_modelParams,
+                                        resolMethods=_resolMethods,
+                                        discount=_discount,
+                                        maxIter=_maxIter)
+print(res)
+# [{'name': 'consensus.2.c1', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.002315044403076172, 'ValueIterationGS': 0.001195836067199707, 'PolicyIterationModified': 0.011821019649505615}, {'name': 'consensus.2.c2', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.002155637741088867, 'ValueIterationGS': 0.0011690855026245117, 'PolicyIterationModified': 0.013560998439788818}, {'name': 'consensus.2.disagree', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.0021880507469177247, 'ValueIterationGS': 0.0011899828910827636, 'PolicyIterationModified': 0.011802744865417481}, {'name': 'consensus.2.steps_max', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.005042576789855957, 'ValueIterationGS': 0.0027849316596984864, 'PolicyIterationModified': 0.01600644588470459}, {'name': 'consensus.2.steps_min', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.005023396015167237, 'ValueIterationGS': 0.0026710152626037596, 'PolicyIterationModified': 0.01613408327102661}]
 
-### Methods
-* **`getMDPData(name: str)`**
 
-    **Starting from the initial states, it explores all reachale states under the specified property and returns a dictionary with all necessary data to build a corresponding Marmote instance (`MDPs`). See the `DataMarmote` class documentation above for more details on the returned data.**
+res  = janiParser.benchmarkJaniMDPModel(_fullModelName,
+                                        solverName="MDPToolbox",
+                                        modelParams=_modelParams,
+                                        resolMethods=_resolMethods,
+                                        discount=_discount,
+                                        maxIter=_maxIter)
+print(res)
+# [{'name': 'consensus.2.c1', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.003072166442871094, 'ValueIterationGS': 4.449053013324738, 'PolicyIterationModified': 4.976987838745117e-05}, {'name': 'consensus.2.c2', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.0031478404998779297, 'ValueIterationGS': 4.4206886172294615, 'PolicyIterationModified': 5.385875701904297e-05}, {'name': 'consensus.2.disagree', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.003268909454345703, 'ValueIterationGS': 4.2764752268791195, 'PolicyIterationModified': 5.2940845489501956e-05}, {'name': 'consensus.2.steps_max', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.0054837226867675785, 'ValueIterationGS': 7.362779879570008, 'PolicyIterationModified': 4.925727844238281e-05}, {'name': 'consensus.2.steps_min', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.005443894863128662, 'ValueIterationGS': 7.392302370071411, 'PolicyIterationModified': 4.929304122924805e-05}]
+```
 
-    **Parameters**:
+## Project Structure
+```
+janiParser
+├── README.md
+├── __init__.py                 # Package initializer.
+├── dataMarmote.py              # Implementation of the DataMarmote class.
+├── doc.md                      # Documentation of core classses.
+├── exception.py                # Custom exception classes.
+├── reader
+│   ├── __init__.py
+│   ├── automata.py
+│   ├── expression.py
+│   ├── function.py
+│   ├── model.py                # Implementations of JaniModel and JaniRModel classes.
+│   ├── property.py
+│   ├── reader.py               # Implementations of JaniReader and JaniRReader classes.
+│   ├── state.py
+│   └── variable.py
+└── utils.py                    # Utility fonctions for benchmarking automation.
+```
 
-    * **name**: The name of the property to be modeled.
+### Description of main source files
+* **`janiParser/reader/reader.py`**:
 
-* **`getMCData()`**
+    This file provides the **core implementation for parsing JANI and JANIR files**. It includes the classes `JaniReader` and `JaniRReader`, which are responsible for **loading and interpreting models** from either a **local file path** or a **URL path**, particularly when the `.jani` file is available online at `https://qcomp.org/benchmarks/`.
 
-    **This method is similar to `getMDPData`. It explores all reachable states and returns a dictionary with all necessary data to build a corresponding Marmote instance (`MCs`). See the `DataMarmote` class documentation above for more details on the returned data.**
+* **`janiParser/reader/model.py`**
 
-## `janiParser.reader.model.JaniModel`
-### Constructor
-`Bases: janiParser.reader.model.JaniModel`
+    This file defines the `JaniModel` and `JaniRModel` classes, which represent the **internal structure** of standard JANI and extended JANIR models. These classes provide two key methods: `getMDPData` and `getMCData`. **(See [documentation](./doc.md) for more details)**
 
-`JaniRModel(name: str, type: str, criterion: str, gamma: float, horizon: int)`
+* **`janiParser/dataMarmote.py`**
 
-**Parameters**:
+    This file contains a single class, `DataMarmote`, which serves as an **intermediary between JANI/JANIR models and Marmote instances**. It handles the **conversion of extracted data into a format compatible with Marmote**, and also supports translating standard JANI models into their extended JANIR form.
 
-* **name**: The name of the model.
+* **`janiParser/utils.py`**
 
-* **type**: The type of the model. Supported types include: `DiscountedMDP`, `AverageMDP`, `TotalRewardMDP`, `FiniteHorizonMDP` and `MarkovChain`.
+    **This file includes a set of help functions used to automate benchmarking.**
 
-* **criterion**: The optimization criterion used for the model (`"max"` or `"min"`).
-
-* **gamma**: The discount factor used in discounted and finite horizon models.
-
-* **horizon**: The finite horizon length used in finite horizon models.
-
-### Methods
-* **`getMDPData()`**
-
-    **This method takes no arguments. Starting from the initial states, it explores all reachale states under the specified property and returns a dictionary with all necessary data to build a corresponding Marmote instance (`MDPs`). See the `DataMarmote` class documentation above for more details on the returned data.**
-
-* **`getMCData()`**
-
-    **This method is similar to `getMDPData`. It explores all reachable states and returns a dictionary with all necessary data to build a corresponding Marmote instance (`MCs`). See the `DataMarmote` class documentation above for more details on the returned data.**
-
-## `janiParser.utils`
-### Functions
-* **`buildAndSaveMDPModelFromQCompBenchmark(fullModelName: str, modelParams: dict, replace: bool)`**
-* **`loadDataMarmoteFromPickleFile(path: str)`**
+### Resources
+| Resource | Description |
+| -------- | ----------- |
+| **[Core Classes Documentation](./doc.md)** | Detailed documentation for all core classes and utility functions |
+| **[JANI Specification](https://jani-spec.org/)** | Official model specification for JANI files |
+| **[Marmote Python API Documentations](https://marmote.gitlabpages.inria.fr/marmote/python_api.html)** | Marmote API documentations |
+|**[MDPToolbox API Documentations](https://pymdptoolbox.readthedocs.io/en/latest/api/mdp.html)** | MDPToolbox API documentations |

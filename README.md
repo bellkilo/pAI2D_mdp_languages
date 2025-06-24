@@ -1,114 +1,153 @@
-# AI2D project 2024-2025: Comparison of methods for solving MDPs on modeling language instances
+# AI2D Project 2024-2025: Comparison of Methods for Solving MDPs on Modeling Language Instances
 
-## Description
-**For this project, we primarily implemented a parser capable of translating a specific subset of JANI files into corresponding Marmote instances.** This parser does not support all the model types defined in the JANI specification; instead, it is limited to discrete-time Markov models, specifically **Discrete-Time Markov Chains (dtmc)** and **Discrete-Time Markov Decision Process (mdp)**.
+## Project Overview
+**For this project, we primarily implemented a parser that translates a specific subset of JANI files into corresponding Marmote instances.** This parser does not support the full JANI specification; it is limited to discrete-time Markov models, specifically **Discrete-Time Markov Chains (DTMC)** and **Discrete-Time Markov Decision Processes (MDP)**.  
+We also introduce an extension to JANI, named JANI-R, to overcome the expressiveness limitations of the standard JANI format for MDP modeling. Unlike the original JANI specification, which only supports shortest or longest path objectives, JANI-R enables a more general representation of MDPs.
 
-We have also introduced **an extension to JANI**, named **JANIR**, since we've noticed that standard JANI files cannot represent all MDP model types. In particular, they are limited to the modeling of **shortest path or longest path MSPs**.
-
-This project is carried out by **`Zeyu TAO`** and **`Jiahua LI`**, and supervised **`Mr Emmanuel HYON`** and **`Mr Pierre-Henri WUILLEMIN`**.
+This project was carried out by **`Zeyu TAO`** and **`Jiahua LI`**, under the supervision of **`Mr. Emmanuel HYON`** and **`Mr. Pierre-Henri WUILLEMIN`**.
 
 ## Installation
-To install via git
+### Prerequistes
+* **[marmote](https://marmote.gitlabpages.inria.fr/marmote/index.html)**
+* **[pymdptoolbox](https://pymdptoolbox.readthedocs.io/en/latest/index.html)**
+* **[numpy](https://numpy.org)**
+* **[scipy](https://scipy.org)**
+
+To install the above dependencies, use the following command:
+```bash
+conda install -c marmote -c conda-forge  marmote=1.2.0
+pip install pymdptoolbox, numpy, scipy
+```
+
+### Installation via Git
 ```bash
 git clone git@github.com:bellkilo/pAI2D_mdp_languages.git
 ```
 
+### Installation via Pip
+```bash
+pip install git+https://github.com/bellkilo/pAI2D_mdp_languages
+```
+
 ## Usage
-### Baseline architecture
-<img src="architecture.png" width="75%">
+### System Architecture
+<img src="architecture.png" width="50%">
 
-### JANI to Marmote instance
+### JANI $\rightarrow$ Marmote Instance
 ```python
-from janiParser.reader.reader import JaniReader
-from janiParser.dataMarmote.dataMarmote import DataMarmote
+import janiParser
 
-# Create an instance of JaniReader.
-# This class requires at least the local file path or URL path of the target file.
-# (Details about the JaniReader class are provided in ./janiParser/README.md file.)
+# Initialize reader.
+# This class requires at least the local file path or URL path to the target file.
+# (See janiParser/doc.md for more details about the JaniReader class.)
+# Example of using the local file path.
+# reader = janiParser.JaniReader("./benchmarks/prism2jani/philosophers-mdp.3.v1.jani")
+
 # Example of using the URL path.
-# reader = JaniReader("https://qcomp.org/benchmarks/mdp/philosophers-mdp/philosophers-mdp.3.jani", isLocalPath=False)
-# Example of using the local path.
-reader = JaniReader("./benchmarks/prism2jani/philosophers-mdp.3.v1.jani")
+reader = janiParser.JaniReader("https://qcomp.org/benchmarks/mdp/philosophers-mdp/philosophers-mdp.3.jani", isLocalPath=False)
 
-# Load and parse the target file to build an instance of JaniModel.
 model = reader.build()
-
-# Get all the data needed to build the Marmote instance.
-# The `getMDPData` function takes as argument the name of the property to be modeled (JANI limitation).
+# The getMDPData(...) function takes as argument the name of the property
+# to be modeled. (JANI limitation.)
+# Note that a JANI file may define multiple properties,
+# and each of which can correspond to a distinct instance of the MDP problem.
 MDPData = model.getMDPData("eat")
 
-# Create an instance of DataMarmote using the data returned by `getMDPData` or `getMCData` function.
-dataMarmote = DataMarmote(MDPData)
-
-# Create the corresponding Marmote instance.
+dataMarmote = janiParser.DataMarmote(MDPData)
 mdp = dataMarmote.createMarmoteObject()
 ```
 
-### JANI to JANIR
+### JANI $\rightarrow$ JANI-R
 ```python
-from janiParser.reader.reader import JaniReader
-from janiParser.dataMarmote.dataMarmote import DataMarmote
-
-# Create an instance of JaniReader.
-# This class requires at least the local file path or URL path of the target file.
-# (Details about the JaniReader class are provided in ./janiParser/README.md file.)
-# Example of using the URL path.
-# reader = JaniReader("https://qcomp.org/benchmarks/mdp/philosophers-mdp/philosophers-mdp.3.jani", isLocalPath=False)
-# Example of using the local path.
-reader = JaniReader("./benchmarks/prism2jani/philosophers-mdp.3.v1.jani")
-
-# Load and parse the target file to build an instance of JaniModel.
-model = reader.build()
-
-# Get all the data needed to build the Marmote instance.
-# The `getMDPData` function takes as argument the name of the property to be modeled (JANI limitation).
-MDPData = model.getMDPData("eat")
-
-# Create an instance of DataMarmote using the data returned by `getMDPData` or `getMCData` function.
-dataMarmote = DataMarmote(MDPData)
-
-########## ##########
-# Save the current model as a .janir file.
-dataMarmote.saveAsJaniRFile("./philosophers-mdp.3.v1.janir")
+# Save as extended format JANI-R.
+dataMarmote.saveAsJaniRFile("./output.janir")
 ```
 
-### JANIR to Marmote instance
+### JANI-R $\rightarrow$ Marmote Instance
 ```python
-from janiParser.reader.reader import JaniRReader
-from janiParser.dataMarmote.dataMarmote import DataMarmote
-
-# Create an instance of JaniRReader.
 # This class works in the same way as JaniReader, but it does not support the URL path,
-# which only takes as argument the local file path of the target file.
-reader = JaniReader("./philosophers-mdp.3.v1.janir")
+# which only takes as argument the local file path to the target file.
+reader = janiParser.JaniRReader("./output.janir")
 
-# Load and parse the target file to build an instance of JaniRModel.
 model = reader.build()
-
-# Get all the data needed to build the Marmote instance.
-# The `getMDPData` fucntion written in the JaniRModel class takes no arguments,
-# since it defines an MDP in a general way, so there's no property to specify.
+# Since JANI-R defines MDPs generally, no specific property needs to be specified.
 MDPData = model.getMDPData()
 
-# Create an instance of DataMarmote using the data returned by `getMDPData` or `getMCData` function.
-dataMarmote = DataMarmote(MDPData)
-
-# Create the corresponding Marmote instance.
+dataMarmote = janiParser.DataMarmote(MDPData)
 mdp = dataMarmote.createMarmoteObject()
 ```
 
-## Description of main source files
-We provide the brief description of each main source file used in the project, along with the classes implemented in them (**Detailed documentation for each class is available in the `./janiParser/README.md` file.**)
+### Benchmarking
+```python
+_fullModelName = "consensus.2.jani"
+_modelParams = { "K": 10 }
+_resolMethods = ["ValueIteration", "ValueIterationGS", "PolicyIterationModified"]
+_discount = .95
+_maxIter = 1_000_000_000
+
+res  = janiParser.benchmarkJaniMDPModel(_fullModelName,
+                                        solverName="Marmote",
+                                        replace=True,
+                                        modelParams=_modelParams,
+                                        resolMethods=_resolMethods,
+                                        discount=_discount,
+                                        maxIter=_maxIter)
+print(res)
+# [{'name': 'consensus.2.c1', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.002315044403076172, 'ValueIterationGS': 0.001195836067199707, 'PolicyIterationModified': 0.011821019649505615}, {'name': 'consensus.2.c2', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.002155637741088867, 'ValueIterationGS': 0.0011690855026245117, 'PolicyIterationModified': 0.013560998439788818}, {'name': 'consensus.2.disagree', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.0021880507469177247, 'ValueIterationGS': 0.0011899828910827636, 'PolicyIterationModified': 0.011802744865417481}, {'name': 'consensus.2.steps_max', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.005042576789855957, 'ValueIterationGS': 0.0027849316596984864, 'PolicyIterationModified': 0.01600644588470459}, {'name': 'consensus.2.steps_min', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.005023396015167237, 'ValueIterationGS': 0.0026710152626037596, 'PolicyIterationModified': 0.01613408327102661}]
+
+
+res  = janiParser.benchmarkJaniMDPModel(_fullModelName,
+                                        solverName="MDPToolbox",
+                                        modelParams=_modelParams,
+                                        resolMethods=_resolMethods,
+                                        discount=_discount,
+                                        maxIter=_maxIter)
+print(res)
+# [{'name': 'consensus.2.c1', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.003072166442871094, 'ValueIterationGS': 4.449053013324738, 'PolicyIterationModified': 4.976987838745117e-05}, {'name': 'consensus.2.c2', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.0031478404998779297, 'ValueIterationGS': 4.4206886172294615, 'PolicyIterationModified': 5.385875701904297e-05}, {'name': 'consensus.2.disagree', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.003268909454345703, 'ValueIterationGS': 4.2764752268791195, 'PolicyIterationModified': 5.2940845489501956e-05}, {'name': 'consensus.2.steps_max', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.0054837226867675785, 'ValueIterationGS': 7.362779879570008, 'PolicyIterationModified': 4.925727844238281e-05}, {'name': 'consensus.2.steps_min', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.005443894863128662, 'ValueIterationGS': 7.392302370071411, 'PolicyIterationModified': 4.929304122924805e-05}]
+```
+
+## Project Structure
+```
+janiParser
+├── README.md
+├── __init__.py                 # Package initializer.
+├── dataMarmote.py              # Implementation of the DataMarmote class.
+├── doc.md                      # Documentation of core classses.
+├── exception.py                # Custom exception classes.
+├── reader
+│   ├── __init__.py
+│   ├── automata.py
+│   ├── expression.py
+│   ├── function.py
+│   ├── model.py                # Implementations of JaniModel and JaniRModel classes.
+│   ├── property.py
+│   ├── reader.py               # Implementations of JaniReader and JaniRReader classes.
+│   ├── state.py
+│   └── variable.py
+└── utils.py                    # Utility fonctions for benchmarking automation.
+```
+
+### Description of main source files
 * **`janiParser/reader/reader.py`**:
 
-    **This file contains the main implementation for parsing JANI or JANIR files.** It includes `JaniReader` and `JaniRReader` classes, which are responsible for reading and interpreting both JANI and extended JANIR models from a local file path or from a URL path (specifically if the JANI file is available at `https://qcomp.org/benchmarks/`).
+    This file provides the **core implementation for parsing JANI and JANIR files**. It includes the classes `JaniReader` and `JaniRReader`, which are responsible for **loading and interpreting models** from either a **local file path** or a **URL path**, particularly when the `.jani` file is available online at `https://qcomp.org/benchmarks/`.
 
-* **`janiParser/reader/model.py`**:
+* **`janiParser/reader/model.py`**
 
-    **This file defines two main classes, `JaniModel` and `JaniRModel`**, which encapsulate the internal structure of the JANI and JANIR files respectively. These classes provide two main methods, `getMDPData`and `getMCData`, which extract data from the JANI or JANIR structure and return relevant data in the form of a Python dictionary (**See `./janiParser/README.md` for more details**).
+    This file defines the `JaniModel` and `JaniRModel` classes, which represent the **internal structure** of standard JANI and extended JANIR models. These classes provide two key methods: `getMDPData` and `getMCData`. **(See [documentation](./janiParser/doc.md) for more details)**
 
-* **`janiParser/dataMarmote/dataMarmote.py`**:
+* **`janiParser/dataMarmote.py`**
 
-    **This file contains a single class, `DataMarmote`**, which serves as an intermediary between JANI or JANIR files and Marmote instances. This class primarily handles the translation of data extracted from JANI or JANIR models into a format compatible with Marmote, and also supports conversion from standard JANI to its extended JANIR form.
+    This file contains a single class, `DataMarmote`, which serves as an **intermediary between JANI/JANIR models and Marmote instances**. It handles the **conversion of extracted data into a format compatible with Marmote**, and also supports translating standard JANI models into their extended JANIR form.
 
-* **`janiParser/utils.py`**:
+* **`janiParser/utils.py`**
+
+    **This file includes a set of help functions used to automate benchmarking.**
+
+### Resources
+| Resource | Description |
+| -------- | ----------- |
+| **[Core Classes Documentation](./janiParser/doc.md)** | Detailed documentation for all core classes and utility functions |
+| **[JANI Specification](https://jani-spec.org/)** | Official model specification for JANI files |
+| **[Marmote Python API Documentations](https://marmote.gitlabpages.inria.fr/marmote/python_api.html)** | Marmote API documentations |
+|**[MDPToolbox API Documentations](https://pymdptoolbox.readthedocs.io/en/latest/api/mdp.html)** | MDPToolbox API documentations |
