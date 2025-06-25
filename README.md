@@ -31,7 +31,7 @@ pip install git+https://github.com/bellkilo/pAI2D_mdp_languages
 
 ## Usage
 ### System Architecture
-<img src="architecture.png" width="50%">
+<img src="docs/architecture.png" width="50%">
 
 ### JANI $\rightarrow$ Marmote Instance
 ```python

@@ -31,7 +31,7 @@ pip install git+https://github.com/bellkilo/pAI2D_mdp_languages
 
 ## Usage
 ### System Architecture
-<img src="architecture.png" width="50%">
+<img src="../docs/architecture.png" width="50%">
 
 ### JANI $\rightarrow$ Marmote Instance
 ```python
@@ -161,7 +161,7 @@ janiParser
 
 * **`janiParser/reader/model.py`**
 
-    This file defines the `JaniModel` and `JaniRModel` classes, which represent the **internal structure** of standard JANI and extended JANIR models. These classes provide two key methods: `getMDPData` and `getMCData`. **(See [documentation](./janiParser/doc.md) for more details)**
+    This file defines the `JaniModel` and `JaniRModel` classes, which represent the **internal structure** of standard JANI and extended JANIR models. These classes provide two key methods: `getMDPData` and `getMCData`. **(See [documentation](doc.md) for more details)**
 
 * **`janiParser/dataMarmote.py`**
 
@@ -174,7 +174,7 @@ janiParser
 ### Resources
 | Resource | Description |
 | -------- | ----------- |
-| **[Core Classes Documentation](./janiParser/doc.md)** | Detailed documentation for all core classes and utility functions |
+| **[Core Classes Documentation](doc.md)** | Detailed documentation for all core classes and utility functions |
 | **[JANI Specification](https://jani-spec.org/)** | Official model specification for JANI files |
 | **[Marmote Python API Documentations](https://marmote.gitlabpages.inria.fr/marmote/python_api.html)** | Marmote API documentations |
 |**[MDPToolbox API Documentations](https://pymdptoolbox.readthedocs.io/en/latest/api/mdp.html)** | MDPToolbox API documentations |
