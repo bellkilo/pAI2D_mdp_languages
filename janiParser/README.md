@@ -31,7 +31,7 @@ pip install git+https://github.com/bellkilo/pAI2D_mdp_languages
 
 ## Usage
 ### System Architecture
-<img src="../architecture.png" width="50%">
+<img src="architecture.png" width="50%">
 
 ### JANI $\rightarrow$ Marmote Instance
 ```python
@@ -80,30 +80,57 @@ mdp = dataMarmote.createMarmoteObject()
 ### Benchmarking
 ```python
 _fullModelName = "consensus.2.jani"
+_srcName = "QComp"
 _modelParams = { "K": 10 }
-_resolMethods = ["ValueIteration", "ValueIterationGS", "PolicyIterationModified"]
+_resolMethods = ["ValueIteration", "PolicyIterationModified"]
+_reps = 20
 _discount = .95
+_epsilon = 1e-3
 _maxIter = 1_000_000_000
+_maxInIter = 10
 
 res  = janiParser.benchmarkJaniMDPModel(_fullModelName,
                                         solverName="Marmote",
-                                        replace=True,
+                                        # The following parameters are optional.
+                                        srcName=_srcName,           # Indicate the benchmark source, currently only "QComp" sources are recognized.
                                         modelParams=_modelParams,
+                                        replace=True,
                                         resolMethods=_resolMethods,
+                                        reps=_reps,                 # Number of repetitions.
                                         discount=_discount,
-                                        maxIter=_maxIter)
+                                        epsilon=_epsilon,
+                                        maxIter=_maxIter,           # Number of maximum iterations.
+                                        maxInIter=_maxInIter)       # Number of maximum inner iterations. (for modified policy methods)
 print(res)
-# [{'name': 'consensus.2.c1', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.002315044403076172, 'ValueIterationGS': 0.001195836067199707, 'PolicyIterationModified': 0.011821019649505615}, {'name': 'consensus.2.c2', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.002155637741088867, 'ValueIterationGS': 0.0011690855026245117, 'PolicyIterationModified': 0.013560998439788818}, {'name': 'consensus.2.disagree', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.0021880507469177247, 'ValueIterationGS': 0.0011899828910827636, 'PolicyIterationModified': 0.011802744865417481}, {'name': 'consensus.2.steps_max', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.005042576789855957, 'ValueIterationGS': 0.0027849316596984864, 'PolicyIterationModified': 0.01600644588470459}, {'name': 'consensus.2.steps_min', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.005023396015167237, 'ValueIterationGS': 0.0026710152626037596, 'PolicyIterationModified': 0.01613408327102661}]
+# [{'name': 'consensus.2.c1', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.002315044403076172, 'ValueIterationGS': 0.001195836067199707, 
+# 'PolicyIterationModified': 0.011821019649505615}, {'name': 'consensus.2.c2', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.002155637741088867, 
+# 'ValueIterationGS': 0.0011690855026245117, 'PolicyIterationModified': 0.013560998439788818}, {'name': 'consensus.2.disagree', 'number-of-states': 1296, 
+# 'number-of-actions': 3, 'ValueIteration': 0.0021880507469177247, 'ValueIterationGS': 0.0011899828910827636, 'PolicyIterationModified': 0.011802744865417481}, {'name': 
+# 'consensus.2.steps_max', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.005042576789855957, 'ValueIterationGS': 0.0027849316596984864, 
+# 'PolicyIterationModified': 0.01600644588470459}, {'name': 'consensus.2.steps_min', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.
+# 005023396015167237, 'ValueIterationGS': 0.0026710152626037596, 'PolicyIterationModified': 0.01613408327102661}]
 
 
 res  = janiParser.benchmarkJaniMDPModel(_fullModelName,
                                         solverName="MDPToolbox",
+                                        # The following parameters are optional.
+                                        srcName=_srcName,           # Indicate the benchmark source, currently only "QComp" sources are recognized.
                                         modelParams=_modelParams,
+                                        replace=True,
                                         resolMethods=_resolMethods,
+                                        reps=_reps,                 # Number of repetitions.
                                         discount=_discount,
-                                        maxIter=_maxIter)
+                                        epsilon=_epsilon,
+                                        maxIter=_maxIter,           # Number of maximum iterations.
+                                        maxInIter=_maxInIter)       # Number of maximum inner iterations. (for modified policy methods)
 print(res)
-# [{'name': 'consensus.2.c1', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.003072166442871094, 'ValueIterationGS': 4.449053013324738, 'PolicyIterationModified': 4.976987838745117e-05}, {'name': 'consensus.2.c2', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.0031478404998779297, 'ValueIterationGS': 4.4206886172294615, 'PolicyIterationModified': 5.385875701904297e-05}, {'name': 'consensus.2.disagree', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.003268909454345703, 'ValueIterationGS': 4.2764752268791195, 'PolicyIterationModified': 5.2940845489501956e-05}, {'name': 'consensus.2.steps_max', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.0054837226867675785, 'ValueIterationGS': 7.362779879570008, 'PolicyIterationModified': 4.925727844238281e-05}, {'name': 'consensus.2.steps_min', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.005443894863128662, 'ValueIterationGS': 7.392302370071411, 'PolicyIterationModified': 4.929304122924805e-05}]
+# [{'name': 'consensus.2.c1', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.003072166442871094, 'ValueIterationGS': 4.449053013324738, 
+# 'PolicyIterationModified': 4.976987838745117e-05}, {'name': 'consensus.2.c2', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.0031478404998779297, 
+# 'ValueIterationGS': 4.4206886172294615, 'PolicyIterationModified': 5.385875701904297e-05}, {'name': 'consensus.2.disagree', 'number-of-states': 1296, 'number-of-actions': 
+# 3, 'ValueIteration': 0.003268909454345703, 'ValueIterationGS': 4.2764752268791195, 'PolicyIterationModified': 5.2940845489501956e-05}, {'name': 'consensus.2.steps_max', 
+# 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.0054837226867675785, 'ValueIterationGS': 7.362779879570008, 'PolicyIterationModified': 4.
+# 925727844238281e-05}, {'name': 'consensus.2.steps_min', 'number-of-states': 1296, 'number-of-actions': 3, 'ValueIteration': 0.005443894863128662, 'ValueIterationGS': 7.
+# 392302370071411, 'PolicyIterationModified': 4.929304122924805e-05}]
 ```
 
 ## Project Structure
@@ -134,7 +161,7 @@ janiParser
 
 * **`janiParser/reader/model.py`**
 
-    This file defines the `JaniModel` and `JaniRModel` classes, which represent the **internal structure** of standard JANI and extended JANIR models. These classes provide two key methods: `getMDPData` and `getMCData`. **(See [documentation](./doc.md) for more details)**
+    This file defines the `JaniModel` and `JaniRModel` classes, which represent the **internal structure** of standard JANI and extended JANIR models. These classes provide two key methods: `getMDPData` and `getMCData`. **(See [documentation](./janiParser/doc.md) for more details)**
 
 * **`janiParser/dataMarmote.py`**
 
@@ -147,7 +174,7 @@ janiParser
 ### Resources
 | Resource | Description |
 | -------- | ----------- |
-| **[Core Classes Documentation](./doc.md)** | Detailed documentation for all core classes and utility functions |
+| **[Core Classes Documentation](./janiParser/doc.md)** | Detailed documentation for all core classes and utility functions |
 | **[JANI Specification](https://jani-spec.org/)** | Official model specification for JANI files |
 | **[Marmote Python API Documentations](https://marmote.gitlabpages.inria.fr/marmote/python_api.html)** | Marmote API documentations |
 |**[MDPToolbox API Documentations](https://pymdptoolbox.readthedocs.io/en/latest/api/mdp.html)** | MDPToolbox API documentations |
